@@ -1,0 +1,34 @@
+Package: VMIBaseballAnalytics
+Type: Package
+Title: VMI Baseball Analytics
+Version: 1.0.0
+Date: 2025-09-29
+Author: VMI Baseball Team
+Maintainer: VMI Baseball Team <baseball@vmi.edu>
+Description: VMI Baseball Analytics Shiny Application for tracking and analyzing baseball performance data from TrackMan.
+License: MIT
+Depends: 
+    R (>= 4.0.0)
+Imports:
+    shiny (>= 1.7.0),
+    dplyr (>= 1.1.0),
+    ggplot2 (>= 3.4.0),
+    DT (>= 0.30),
+    gridExtra (>= 2.3),
+    patchwork (>= 1.1.0),
+    rsconnect (>= 1.0.0),
+    hexbin (>= 1.28.0),
+    ggiraph (>= 0.8.0),
+    httr2 (>= 1.0.0),
+    MASS (>= 7.3.0),
+    curl (>= 5.0.0),
+    readr (>= 2.1.0),
+    lubridate (>= 1.9.0),
+    stringr (>= 1.5.0),
+    purrr (>= 1.0.0),
+    akima (>= 0.6.0),
+    plotly (>= 4.10.0),
+    RCurl (>= 1.98.0),
+    jsonlite (>= 1.8.0)
+Encoding: UTF-8
+LazyData: true
