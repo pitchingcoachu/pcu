@@ -51,9 +51,9 @@ jobs:
         SHINYAPPS_TOKEN: ${{ secrets.SHINYAPPS_TOKEN }}
         SHINYAPPS_SECRET: ${{ secrets.SHINYAPPS_SECRET }}
       run: |
-        Rscript -e "rsconnect::setAccountInfo(name='jaredgaynor', token='${{ secrets.SHINYAPPS_TOKEN }}', secret='${{ secrets.SHINYAPPS_SECRET }}')"
+        Rscript -e "rsconnect::setAccountInfo(name='${{ secrets.SHINYAPPS_ACCOUNT }}', token='${{ secrets.SHINYAPPS_TOKEN }}', secret='${{ secrets.SHINYAPPS_SECRET }}')"
 
-    - name: Sync GCU data
+    - name: Sync PCU data
       run: Rscript automated_data_sync.R
 
     - name: Sync TrackMan media
@@ -63,8 +63,7 @@ jobs:
         TM_CLIENT_SECRET: 8dc67309-eef1-451a-886c-1c776380b666
         CLOUDINARY_CLOUD_NAME: pitchingcoachu
         CLOUDINARY_UPLOAD_PRESET: pcu_notes_unsigned
-        CLOUDINARY_FOLDER: trackman
-        TM_ENV: practice
+        
 
     - name: Check if data directory exists
       id: check_data
