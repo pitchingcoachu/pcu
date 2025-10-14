@@ -20,7 +20,7 @@ required_packages <- c(
   "ggplot2",
   "purrr",
   "DT",
-  "gridExtra", 
+  "gridExtra",
   "patchwork",
   "rsconnect",
   "hexbin",
@@ -34,8 +34,10 @@ required_packages <- c(
   "akima",
   "plotly",
   "RCurl",
-  "jsonlite"
+  "jsonlite",
+  "digest"
 )
+
 
 # Install packages
 cat("Installing required packages for VMI Baseball Analytics...\n")
