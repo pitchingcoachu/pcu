@@ -16,7 +16,7 @@ suppressPackageStartupMessages({
 # Deploy to shinyapps.io
 deploy_app <- function() {
   tryCatch({
-    cat("Starting deployment of VMI Baseball Analytics app...\n")
+    cat("Starting deployment of Harvard app...\n")
     
     # Run package installation script
     cat("Running package installation script...\n")
@@ -58,7 +58,7 @@ deploy_app <- function() {
     cat("Deploying to shinyapps.io...\n")
     deployApp(
       appDir = ".",
-      appName = "vmibaseball",
+      appName = "tmdata1",
       forceUpdate = TRUE,
       launch.browser = FALSE,
       logLevel = "verbose"
@@ -77,7 +77,7 @@ deploy_app <- function() {
 
 # Run deployment
 if (!interactive()) {
-  cat("VMI Baseball Analytics - Deployment Script\n")
+  cat("CBU - Deployment Script\n")
   cat("==========================================\n")
   success <- deploy_app()
   if (!success) {
