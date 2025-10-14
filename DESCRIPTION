@@ -1,11 +1,11 @@
-Package: VMIBaseballAnalytics
+Package: CBUBaseballAnalytics
 Type: Package
-Title: VMI Baseball Analytics
+Title: CBU Baseball Analytics
 Version: 1.0.0
 Date: 2025-09-29
-Author: VMI Baseball Team
-Maintainer: VMI Baseball Team <baseball@vmi.edu>
-Description: VMI Baseball Analytics Shiny Application for tracking and analyzing baseball performance data from TrackMan.
+Author: CBU Baseball Team
+Maintainer: CBU Baseball Team <baseball@vmi.edu>
+Description: CBU Baseball Analytics Shiny Application for tracking and analyzing baseball performance data from TrackMan.
 License: MIT
 Depends: 
     R (>= 4.0.0)
