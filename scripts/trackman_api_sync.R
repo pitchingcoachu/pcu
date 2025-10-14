@@ -8,7 +8,7 @@
 #  * Persists a video mapping table under data/video_map.csv
 #
 # Usage:
-#   Rscript scripts/trackman_api_sync.R            # defaults to today (or lookback window)
+#   Rscript scripts/trackman_api_sync.R            # defaults to today UTC
 #   Rscript scripts/trackman_api_sync.R 2025-10-11 # specific date
 #   Rscript scripts/trackman_api_sync.R 2025-10-01 2025-10-07
 #
@@ -18,9 +18,8 @@
 #   CLOUDINARY_UPLOAD_PRESET          -> Unsigned preset that allows remote uploads
 #
 # Optional environment variables:
-#   TM_ENV            -> "practice" (default) or "game"
-#   TM_LOOKBACK_DAYS  -> integer lookback window if no dates supplied
-#   CLOUDINARY_FOLDER -> Optional folder prefix
+#   TM_ENV           -> "practice" (default) or "game" to scope discovery
+#   CLOUDINARY_FOLDER -> Folder prefix when creating Cloudinary public IDs
 #
 suppressPackageStartupMessages({
   library(httr2)
@@ -34,16 +33,29 @@ suppressPackageStartupMessages({
   library(glue)
 })
 
+# ---- Helpers ---------------------------------------------------------------
+
 get_script_path <- function() {
   cmd_args <- commandArgs(trailingOnly = FALSE)
-  hit <- cmd_args[grepl("--file=", cmd_args, fixed = TRUE)]
-  if (length(hit)) normalizePath(sub("--file=", "", hit[1]), winslash = "/", mustWork = FALSE) else NA_character_
+  file_arg <- "--file="
+  hit <- cmd_args[grepl(file_arg, cmd_args, fixed = TRUE)]
+  if (length(hit)) {
+    normalizePath(sub(file_arg, "", hit[1]), winslash = "/", mustWork = FALSE)
+  } else {
+    NA_character_
+  }
 }
 
 now_iso <- function() format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
+
 strip_leading_q <- function(x) sub("^\\?", "", x %||% "")
+
 `%||%` <- function(a, b) if (is.null(a) || length(a) == 0 || all(is.na(a))) b else a
-cli_abort <- function(msg) { message("ERROR: ", msg); quit(status = 1) }
+
+cli_abort <- function(msg) {
+  message("ERROR: ", msg)
+  quit(status = 1)
+}
 
 ensure_env <- function(name) {
   val <- Sys.getenv(name, unset = "")
@@ -56,7 +68,7 @@ parse_args_dates <- function() {
   if (length(args) == 0) {
     lookback <- suppressWarnings(as.integer(Sys.getenv("TM_LOOKBACK_DAYS", unset = "0")))
     if (is.na(lookback) || lookback < 0) lookback <- 0L
-    d_to   <- Sys.Date()
+    d_to <- Sys.Date()
     d_from <- d_to - lookback
     return(list(from = d_from, to = d_to))
   }
@@ -82,8 +94,11 @@ format_utc <- function(d, end = FALSE) {
 
 build_project_paths <- function() {
   script_path <- get_script_path()
-  root <- if (is.na(script_path)) normalizePath(".", winslash = "/", mustWork = TRUE)
-          else normalizePath(file.path(dirname(script_path), ".."), winslash = "/", mustWork = TRUE)
+  if (is.na(script_path)) {
+    root <- normalizePath(".", winslash = "/", mustWork = TRUE)
+  } else {
+    root <- normalizePath(file.path(dirname(script_path), ".."), winslash = "/", mustWork = TRUE)
+  }
   list(
     root = root,
     data_dir = normalizePath(file.path(root, "data"), winslash = "/", mustWork = TRUE),
@@ -122,10 +137,12 @@ trackman_request <- function(token, url, method = "GET", body = NULL) {
     ) |>
     req_timeout(30) |>
     req_error(is_error = ~ FALSE)
+
   if (!is.null(body)) {
     req <- req_body_json(req, body, mode = "json", digits = NA)
     req <- req_headers(req, `Content-Type` = "application/json-patch+json")
   }
+
   res <- req_perform(req)
   if (resp_status(res) >= 400) {
     detail <- tryCatch(resp_body_string(res), error = function(e) "")
@@ -135,36 +152,34 @@ trackman_request <- function(token, url, method = "GET", body = NULL) {
 }
 
 discover_sessions <- function(token, date_from, date_to, env = c("practice", "game")) {
-  env <- match.arg(tolower(env))
+  env <- match.arg(env)
   url <- switch(env,
-    practice = "https://dataapi.trackmanbaseball.com/api/v1/discovery/practice/sessions",
-    game     = "https://dataapi.trackmanbaseball.com/api/v1/discovery/game/sessions"
-  )
+                practice = "https://dataapi.trackmanbaseball.com/api/v1/discovery/practice/sessions",
+                game     = "https://dataapi.trackmanbaseball.com/api/v1/discovery/game/sessions")
   body <- list(
     sessionType = "All",
     utcDateFrom = format_utc(date_from, end = FALSE),
     utcDateTo   = format_utc(date_to, end = TRUE)
   )
   res <- trackman_request(token, url, method = "POST", body = body)
-  tibble::as_tibble(resp_body_json(res, simplifyVector = TRUE))
+  out <- resp_body_json(res, simplifyVector = TRUE)
+  tibble::as_tibble(out)
 }
 
 fetch_video_tokens <- function(token, session_id, env = c("practice", "game")) {
-  env <- match.arg(tolower(env))
+  env <- match.arg(env)
   url <- switch(env,
-    practice = glue("https://dataapi.trackmanbaseball.com/api/v1/media/practice/videotokens/{session_id}"),
-    game     = glue("https://dataapi.trackmanbaseball.com/api/v1/media/game/videotokens/{session_id}")
-  )
+                practice = glue("https://dataapi.trackmanbaseball.com/api/v1/media/practice/videotokens/{session_id}"),
+                game     = glue("https://dataapi.trackmanbaseball.com/api/v1/media/game/videotokens/{session_id}"))
   res <- trackman_request(token, url)
   tibble::as_tibble(resp_body_json(res, simplifyVector = TRUE))
 }
 
 fetch_video_metadata <- function(token, session_id, env = c("practice", "game")) {
-  env <- match.arg(tolower(env))
+  env <- match.arg(env)
   url <- switch(env,
-    practice = glue("https://dataapi.trackmanbaseball.com/api/v1/media/practice/videometadata/{session_id}"),
-    game     = glue("https://dataapi.trackmanbaseball.com/api/v1/media/game/videometadata/{session_id}")
-  )
+                practice = glue("https://dataapi.trackmanbaseball.com/api/v1/media/practice/videometadata/{session_id}"),
+                game     = glue("https://dataapi.trackmanbaseball.com/api/v1/media/game/videometadata/{session_id}"))
   res <- trackman_request(token, url)
   tibble::as_tibble(resp_body_json(res, simplifyVector = TRUE))
 }
@@ -206,6 +221,7 @@ list_azure_blobs <- function(entity_path, endpoint, token) {
 }
 
 extract_play_id <- function(blob_name) {
+  # Expecting Plays/<PLAY_ID>/...
   m <- str_match(blob_name, "^Plays/([0-9a-fA-F-]+)/")
   m[, 2] %||% NA_character_
 }
@@ -245,7 +261,9 @@ upload_cloudinary <- function(azure_url, preset, cloud_name, public_id = NULL) {
     file = azure_url,
     resource_type = "video"
   )
-  if (!is.null(public_id) && nzchar(public_id)) body$public_id <- public_id
+  if (!is.null(public_id) && nzchar(public_id)) {
+    body$public_id <- public_id
+  }
   res <- request(endpoint) |>
     req_body_multipart(!!!body) |>
     req_timeout(60) |>
@@ -291,6 +309,8 @@ append_video_map <- function(df, path) {
   write_csv(df, path)
 }
 
+# ---- Main ------------------------------------------------------------------
+
 main <- function() {
   dates <- parse_args_dates()
   paths <- build_project_paths()
@@ -300,7 +320,7 @@ main <- function() {
   cloud_name <- ensure_env("CLOUDINARY_CLOUD_NAME")
   preset <- ensure_env("CLOUDINARY_UPLOAD_PRESET")
   folder <- Sys.getenv("CLOUDINARY_FOLDER", unset = "trackman")
-  tm_env <- Sys.getenv("TM_ENV", unset = "practice")
+  tm_env <- tolower(Sys.getenv("TM_ENV", unset = "practice"))
 
   message(glue(">> Syncing TrackMan {tm_env} sessions from {dates$from} to {dates$to}"))
   token <- request_trackman_token(tm_client_id, tm_client_secret)
