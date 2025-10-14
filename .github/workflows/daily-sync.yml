@@ -9,16 +9,16 @@ on:
 jobs:
   sync-and-deploy:
     runs-on: ubuntu-latest
-    
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-      
+
     - name: Setup R
       uses: r-lib/actions/setup-r@v2
       with:
         r-version: '4.4.0'
-        
+
     - name: Install system dependencies
       run: |
         sudo apt-get update
@@ -42,21 +42,30 @@ jobs:
           libproj-dev \
           libudunits2-dev
 
-        
     - name: Install R packages
       run: Rscript install_packages.R
-          
+
     - name: Configure rsconnect
       env:
-        SHINYAPPS_ACCOUNT: ${{ secrets.SHINYAPPS_ACCOUNT }}
-        SHINYAPPS_TOKEN: ${{ secrets.SHINYAPPS_TOKEN }}
-        SHINYAPPS_SECRET: ${{ secrets.SHINYAPPS_SECRET }}
+        SHINYAPPS_ACCOUNT: jaredgaynor          # replace if different
+        SHINYAPPS_TOKEN:   ${{ secrets.SHINYAPPS_TOKEN }}
+        SHINYAPPS_SECRET:  ${{ secrets.SHINYAPPS_SECRET }}
       run: |
-        Rscript -e "rsconnect::setAccountInfo(name='${{ secrets.SHINYAPPS_ACCOUNT }}', token='${{ secrets.SHINYAPPS_TOKEN }}', secret='${{ secrets.SHINYAPPS_SECRET }}')"
-        
-    - name: Sync PCU data
+        Rscript -e "rsconnect::setAccountInfo(name='jaredgaynor', token='${{ secrets.SHINYAPPS_TOKEN }}', secret='${{ secrets.SHINYAPPS_SECRET }}')"
+
+    - name: Sync GCU data
       run: Rscript automated_data_sync.R
-        
+
+    - name: Sync TrackMan media
+      run: Rscript scripts/trackman_api_sync.R
+      env:
+        TM_CLIENT_ID: JaredGaynor-edger
+        TM_CLIENT_SECRET: 8dc67309-eef1-451a-886c-1c776380b666
+        CLOUDINARY_CLOUD_NAME: pitchingcoachu
+        CLOUDINARY_UPLOAD_PRESET: pcu_notes_unsigned
+        CLOUDINARY_FOLDER: trackman
+        TM_ENV: practice
+
     - name: Check if data directory exists
       id: check_data
       run: |
@@ -68,11 +77,11 @@ jobs:
           echo "data_updated=false" >> $GITHUB_OUTPUT
           echo "No data directory or no files found"
         fi
-        
+
     - name: Deploy to shinyapps.io
       if: steps.check_data.outputs.data_updated == 'true' || github.event_name == 'workflow_dispatch'
       run: Rscript deploy_script.R
-      
+
     - name: Commit updated data
       if: steps.check_data.outputs.data_updated == 'true'
       run: |
