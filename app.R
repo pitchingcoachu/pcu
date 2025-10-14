@@ -642,6 +642,25 @@ sanitize_for_dt <- function(dfx) {
   dfx
 }
 
+wrap_pitch_counts <- function(x) {
+  vals <- vapply(seq_along(x), function(i) {
+    val <- x[[i]]
+    txt <- as.character(val %||% "")
+    if (!nzchar(trimws(txt))) return("")
+    if (grepl("<", txt, fixed = TRUE)) return(txt)
+    num <- suppressWarnings(as.numeric(gsub("[^0-9]", "", txt)))
+    if (!is.na(num) && num > 0) {
+      sprintf(
+        '<a href="javascript:void(0)" class="pitch-count-link" style="cursor:pointer;">%s</a>',
+        htmltools::htmlEscape(txt)
+      )
+    } else {
+      htmltools::htmlEscape(txt)
+    }
+  }, character(1), USE.NAMES = FALSE)
+  unname(vals)
+}
+
 
 datatable_with_colvis <- function(df, lock = character(0), remember = TRUE, default_visible = names(df)) {
   df <- sanitize_for_dt(df)   # <- central fix
@@ -853,7 +872,7 @@ make_session_logs_table <- function(df) {
           d$PlateLocHeight>= zb  & d$PlateLocHeight<= zt, 1.47,
         ifelse(
           d$PlateLocSide >= -1.5 & d$PlateLocSide <= 1.5 &
-            d$PlateLocHeight>= (2.65 - 1.5) & d$PlateLocHeight <= (2.65 + 1.5),
+            d$PlateLocHeight>= (2.65 - 1.7) & d$PlateLocHeight <= (2.65 + 1.3),
           0.73, 0
         )
       )
@@ -892,7 +911,7 @@ make_session_logs_table <- function(df) {
         ),
         `Comp%`  = .s_safe_div(
           sum(d$PlateLocSide >= -1.5 & d$PlateLocSide <= 1.5 &
-                d$PlateLocHeight >= (2.65 - 1.5) & d$PlateLocHeight <= (2.65 + 1.5), na.rm = TRUE),
+                d$PlateLocHeight >= (2.65 - 1.7) & d$PlateLocHeight <= (2.65 + 1.3), na.rm = TRUE),
           nrow(d)
         ),
         `Strike%`= .s_safe_div(
@@ -947,7 +966,7 @@ assign_where <- function(vec, cond, value) {
 inzone_label <- function(side, height) {
   comp   <- !is.na(side) & !is.na(height) &
     side >= -1.5 & side <= 1.5 &
-    height >= (2.65 - 1.5) & height <= (2.65 + 1.5)
+    height >= (2.65 - 1.7) & height <= (2.65 + 1.3)
   inzone <- !is.na(side) & !is.na(height) &
     side >= ZONE_LEFT & side <= ZONE_RIGHT &
     height >= ZONE_BOTTOM & height <= ZONE_TOP
@@ -1249,8 +1268,8 @@ compute_stuff_simple <- function(df, base_type, level) {
 # Competitive rectangle (same as your dashed box)
 COMP_LEFT   <- -1.5
 COMP_RIGHT  <-  1.5
-COMP_BOTTOM <-  2.65 - 1.5   # 1.15
-COMP_TOP    <-  2.65 + 1.5   # 4.15
+COMP_BOTTOM <-  2.65 - 1.7   # 1.15
+COMP_TOP    <-  2.65 + 1.3   # 4.15
 
 # Map (Balls, Strikes) to Ahead / Even / Behind like your count filter
 count_state_vec <- function(b, s) {
@@ -1515,7 +1534,7 @@ enforce_inzone <- function(df, choice) {
     df[!in_zone, , drop = FALSE]
   } else if (identical(choice, "Competitive")) {
     comp <- (x >= -1.5 & x <= 1.5 &
-               y >= (2.65 - 1.5) & y <= (2.65 + 1.5))
+               y >= (2.65 - 1.7) & y <= (2.65 + 1.3))
     df[comp, , drop = FALSE]
   } else {
     df
@@ -1576,26 +1595,7 @@ apply_count_filter <- function(df, selection) {
 
 # Robust m/d/y date parser for mixed inputs
 parse_date_mdy <- function(x) {
-  x <- trimws(as.character(x))
-  # strip any time portion (" 1:00 PM", "T12:34:56", etc.)
-  x <- sub("^([0-9/\\-]+).*", "\\1", x)
-  
-  out <- suppressWarnings(as.Date(
-    x,
-    tryFormats = c("%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d", "%Y%m%d")
-  ))
-  
-  bad <- is.na(out)
-  if (any(bad)) {
-    num <- suppressWarnings(as.numeric(x[bad]))   # Excel serials
-    is_serial <- !is.na(num) & num > 20000 & num < 60000
-    if (any(is_serial)) {
-      tmp <- out[bad]
-      tmp[is_serial] <- as.Date(num[is_serial], origin = "1899-12-30")
-      out[bad] <- tmp
-    }
-  }
-  out
+  parse_date_flex(x)
 }
 
 
@@ -1938,7 +1938,17 @@ catcher_map <- setNames(raw_catchers, catch_display)
 # ==== PITCHERS-ONLY WHITELIST ====
 ALLOWED_PITCHERS <- c(
   "Stoller, Cody",
+  "Gessner, Josh",
+  "Racioppo, Frank",
   "Barker, Trey",
+  "Blanco, Adrian",
+  "Nichols, Logan",
+  "Tseng, Andrew",
+  "Wallace, Ren",
+  "Burnett, Hudson",
+  "Siebenbrodt, Jack",
+  "Bentivolio, Matt",
+  "Coleman, Brayden",
   "Anderson, Kade",
   "McGinnis, Ayden",
   "Halverson, Ayden",
@@ -2321,7 +2331,7 @@ make_summary <- function(df) {
       ),
       CompPercent    = safe_div(
         sum(PlateLocSide >= -1.5 & PlateLocSide <= 1.5 &
-              PlateLocHeight >= (2.65-1.5) & PlateLocHeight <= (2.65+1.5), na.rm = TRUE),
+              PlateLocHeight >= (2.65-1.7) & PlateLocHeight <= (2.65+1.3), na.rm = TRUE),
         dplyr::n()
       ),
       StrikePercent  = safe_div(
@@ -2353,7 +2363,7 @@ make_summary <- function(df) {
         PlateLocSide >= ZONE_LEFT & PlateLocSide <= ZONE_RIGHT &
           PlateLocHeight >= ZONE_BOTTOM & PlateLocHeight <= ZONE_TOP, 1.47,
         ifelse(PlateLocSide >= -1.5 & PlateLocSide <= 1.5 &
-                 PlateLocHeight >= (2.65-1.5) & PlateLocHeight <= (2.65+1.5), 0.73, 0)
+                 PlateLocHeight >= (2.65-1.7) & PlateLocHeight <= (2.65+1.3), 0.73, 0)
       )) * 100, 1),
       
       # NEW: QP+ per pitch type, then Pitching+ from Stuff+ and QP+
@@ -2447,6 +2457,13 @@ pitch_ui <- function(show_header = FALSE) {
         selectInput(
           "batterSide", "Batter Hand:",
           choices = c("All","Left","Right"), selected = "All"
+        ),
+        
+        # NEW: Video filter
+        selectInput(
+          "videoFilter", "Video:",
+          choices = c("All", "Edger", "Behind", "Side"),
+          selected = "All"
         ),
         
         # NEW: Count filter (multi-select)
@@ -2950,7 +2967,7 @@ mod_hit_server <- function(id, is_active = shiny::reactive(TRUE)) {
         x=c(-0.75,0.75,0.75,0.00,-0.75),
         y=c(1.05,1.05,1.15,1.25,1.15)-0.5
       )
-      cz <- data.frame(xmin = -1.5, xmax = 1.5, ymin = 2.65 - 1.5, ymax = 2.65 + 1.5)
+      cz <- data.frame(xmin = -1.5, xmax = 1.5, ymin = 2.65 - 1.7, ymax = 2.65 + 1.3)
       sz <- data.frame(xmin = ZONE_LEFT, xmax = ZONE_RIGHT, ymin = ZONE_BOTTOM, ymax = ZONE_TOP)
       list(
         geom_polygon(data = home, aes(x, y), fill = NA, color = "black"),
@@ -3291,6 +3308,17 @@ mod_hit_server <- function(id, is_active = shiny::reactive(TRUE)) {
       df <- enforce_inzone(df, input$inZone)
       df <- apply_count_filter(df, input$countFilter)
       
+      # Video filter
+      if (!is.null(input$videoFilter) && input$videoFilter != "All") {
+        if (input$videoFilter == "Edger") {
+          df <- dplyr::filter(df, !is.na(VideoClip) & nzchar(VideoClip))
+        } else if (input$videoFilter == "Behind") {
+          df <- dplyr::filter(df, !is.na(VideoClip2) & nzchar(VideoClip2))
+        } else if (input$videoFilter == "Side") {
+          df <- dplyr::filter(df, !is.na(VideoClip3) & nzchar(VideoClip3))
+        }
+      }
+      
       # ---- Apply BIP Result filter (balls in play only) ----
       bip <- input$bipResult
       if (!is.null(bip) && !("All" %in% bip)) {
@@ -3430,7 +3458,7 @@ mod_hit_server <- function(id, is_active = shiny::reactive(TRUE)) {
       
       home <- data.frame(x=c(-0.75,0.75,0.75,0.00,-0.75),
                          y=c(1.05,1.05,1.15,1.25,1.15)-0.5)
-      cz <- data.frame(xmin = -1.5, xmax = 1.5, ymin = 2.65 - 1.5, ymax = 2.65 + 1.5)
+      cz <- data.frame(xmin = -1.5, xmax = 1.5, ymin = 2.65 - 1.7, ymax = 2.65 + 1.3)
       sz <- data.frame(xmin = ZONE_LEFT, xmax = ZONE_RIGHT, ymin = ZONE_BOTTOM, ymax = ZONE_TOP)
       
       df_known <- dplyr::filter(df_i, !is.na(Result))
@@ -4642,7 +4670,7 @@ mod_catch_server <- function(id, is_active = shiny::reactive(TRUE)) {
       
       # Overlays (same geometry you use elsewhere)
       home <- data.frame(x = c(-0.75,0.75,0.75,0.00,-0.75), y = c(1.05,1.05,1.15,1.25,1.15) - 0.5)
-      cz   <- data.frame(xmin = -1.5, xmax =  1.5, ymin = 2.65 - 1.5, ymax = 2.65 + 1.5)
+      cz   <- data.frame(xmin = -1.5, xmax =  1.5, ymin = 2.65 - 1.7, ymax = 2.65 + 1.3)
       sz   <- data.frame(xmin = ZONE_LEFT, xmax = ZONE_RIGHT, ymin = ZONE_BOTTOM, ymax = ZONE_TOP)
       
       cols <- .safe_heat_cols(256)
@@ -4681,7 +4709,7 @@ mod_catch_server <- function(id, is_active = shiny::reactive(TRUE)) {
                                    Result = factor(compute_result(PitchCall, PlayResult), levels = result_levels))
       
       home <- data.frame(x=c(-0.75,0.75,0.75,0.00,-0.75), y=c(1.05,1.05,1.15,1.25,1.15)-0.5)
-      cz   <- data.frame(xmin = -1.5, xmax = 1.5, ymin = 2.65 - 1.5, ymax = 2.65 + 1.5)
+      cz   <- data.frame(xmin = -1.5, xmax = 1.5, ymin = 2.65 - 1.7, ymax = 2.65 + 1.3)
       sz   <- data.frame(xmin = ZONE_LEFT, xmax = ZONE_RIGHT, ymin = ZONE_BOTTOM, ymax = ZONE_TOP)
       
       df_known <- dplyr::filter(df_i, !is.na(Result))
@@ -5075,7 +5103,7 @@ mod_camps_server <- function(id, is_active = shiny::reactive(TRUE)) {
       
       home <- data.frame(x=c(-0.75,0.75,0.75,0.00,-0.75),
                          y=c(1.05,1.05,1.15,1.25,1.15)-0.5)
-      cz <- data.frame(xmin = -1.5, xmax = 1.5, ymin = 2.65 - 1.5, ymax = 2.65 + 1.5)
+      cz <- data.frame(xmin = -1.5, xmax = 1.5, ymin = 2.65 - 1.7, ymax = 2.65 + 1.3)
       sz <- data.frame(xmin = ZONE_LEFT, xmax = ZONE_RIGHT, ymin = ZONE_BOTTOM, ymax = ZONE_TOP)
       
       p <- ggplot() +
@@ -5119,7 +5147,7 @@ mod_camps_server <- function(id, is_active = shiny::reactive(TRUE)) {
             df$PlateLocHeight >= ZONE_BOTTOM & df$PlateLocHeight <= ZONE_TOP, 1.47,
           ifelse(
             df$PlateLocSide >= -1.5 & df$PlateLocSide <= 1.5 &
-              df$PlateLocHeight >= (2.65-1.5) & df$PlateLocHeight <= (2.65+1.5),
+              df$PlateLocHeight >= (2.65-1.7) & df$PlateLocHeight <= (2.65+1.3),
             0.73, 0
           )
         )
@@ -5175,7 +5203,7 @@ mod_camps_server <- function(id, is_active = shiny::reactive(TRUE)) {
                                           df$PlateLocHeight >= ZONE_BOTTOM & df$PlateLocHeight <= ZONE_TOP);
           safe_pct(sum(inzone, na.rm = TRUE), sum(!is.na(inzone))) },
           `Comp%`        = { comp <- (df$PlateLocSide >= -1.5 & df$PlateLocSide <= 1.5 &
-                                        df$PlateLocHeight >= (2.65-1.5) & df$PlateLocHeight <= (2.65+1.5));
+                                        df$PlateLocHeight >= (2.65-1.7) & df$PlateLocHeight <= (2.65+1.3));
           safe_pct(sum(comp, na.rm = TRUE), sum(!is.na(comp))) },
           `Strike%`      = if (has_pc) safe_pct(strikes, nrow(df)) else "",
           `FPS%`         = safe_pct(fps_live, bf_live),
@@ -5754,14 +5782,13 @@ mod_leader_server <- function(id, is_active = shiny::reactive(TRUE)) {
     })
     
     
-    # Default the date range to MIN and MAX for chosen domain/sessionType (LSU-only)
+    # Default the date range to the most recent day with data for the current filters
     observe({
       req(is_active())
       base <- team_base()
-      first_date <- suppressWarnings(min(base$Date, na.rm = TRUE))
       last_date  <- suppressWarnings(max(base$Date, na.rm = TRUE))
-      if (is.finite(first_date) && is.finite(last_date)) {
-        updateDateRangeInput(session, "dates", start = first_date, end = last_date)
+      if (is.finite(last_date)) {
+        updateDateRangeInput(session, "dates", start = last_date, end = last_date)
       }
     })
     
@@ -5861,7 +5888,7 @@ mod_leader_server <- function(id, is_active = shiny::reactive(TRUE)) {
             df$PlateLocHeight >= ZONE_BOTTOM & df$PlateLocHeight <= ZONE_TOP, 1.47,
           ifelse(
             df$PlateLocSide >= -1.5 & df$PlateLocSide <= 1.5 &
-              df$PlateLocHeight >= (2.65-1.5) & df$PlateLocHeight <= (2.65+1.5),
+              df$PlateLocHeight >= (2.65-1.7) & df$PlateLocHeight <= (2.65+1.3),
             0.73, 0
           )
         )
@@ -5919,7 +5946,7 @@ mod_leader_server <- function(id, is_active = shiny::reactive(TRUE)) {
                                           df$PlateLocHeight >= ZONE_BOTTOM & df$PlateLocHeight <= ZONE_TOP);
           safe_pct(sum(inzone, na.rm = TRUE), sum(!is.na(inzone))) },
           `Comp%`        = { comp <- (df$PlateLocSide >= -1.5 & df$PlateLocSide <= 1.5 &
-                                        df$PlateLocHeight >= (2.65-1.5) & df$PlateLocHeight <= (2.65+1.5));
+                                        df$PlateLocHeight >= (2.65-1.7) & df$PlateLocHeight <= (2.65+1.3));
           safe_pct(sum(comp, na.rm = TRUE), sum(!is.na(comp))) },
           `Strike%`      = if (has_pc) safe_pct(strikes, nrow(df)) else "",
           `FPS%`         = safe_pct(fps_live, bf_live),
@@ -5966,11 +5993,27 @@ mod_leader_server <- function(id, is_active = shiny::reactive(TRUE)) {
         suppressWarnings(out_tbl <- out_tbl %>% dplyr::arrange(dplyr::desc(as.numeric(`Pitching+`))))
       }
       
+      cache_key <- paste0("table_cache_", ns("lbTable"))
+      player_groups <- lapply(by_player, function(dfi) dfi)
+      player_groups[["All"]] <- df
+      session$userData[[cache_key]] <- list(
+        table = out_tbl,
+        groups = player_groups,
+        label_column = "Player",
+        source = df,
+        domain = input$domain
+      )
+
+      disp_tbl <- out_tbl
+      if ("#" %in% names(disp_tbl)) {
+        disp_tbl$`#` <- wrap_pitch_counts(disp_tbl$`#`)
+      }
+
       datatable_with_colvis(
-        out_tbl,
+        disp_tbl,
         lock            = "Player",
         remember        = FALSE,
-        default_visible = intersect(visible_set, names(out_tbl))
+        default_visible = intersect(visible_set, names(disp_tbl))
       )
     }, server = FALSE)
     
@@ -6230,11 +6273,30 @@ mod_leader_server <- function(id, is_active = shiny::reactive(TRUE)) {
         c("Player","#","Velo","ExchangeTime","PopTime","SL+")
       }
       
+      cache_key <- paste0("table_cache_", ns("lbCatchTable"))
+      catcher_groups <- setNames(lapply(names(by_catcher), function(name) {
+        idx <- by_catcher[[name]]
+        df_all[idx, , drop = FALSE]
+      }), names(by_catcher))
+      catcher_groups[["All"]] <- df_all
+      session$userData[[cache_key]] <- list(
+        table = final,
+        groups = catcher_groups,
+        label_column = "Player",
+        source = df_all,
+        domain = "Catching"
+      )
+
+      disp_final <- final
+      if ("#" %in% names(disp_final)) {
+        disp_final$`#` <- wrap_pitch_counts(disp_final$`#`)
+      }
+
       datatable_with_colvis(
-        final,
+        disp_final,
         lock            = "Player",
         remember        = TRUE,
-        default_visible = intersect(default_visible, names(final))
+        default_visible = intersect(default_visible, names(disp_final))
       )
     }, server = FALSE)
     
@@ -6795,7 +6857,7 @@ mod_comp_server <- function(id, is_active = shiny::reactive(TRUE)) {
         )
       home <- data.frame(x = c(-0.75,0.75,0.75,0.00,-0.75),
                          y = c(1.05,1.05,1.15,1.25,1.15) - 0.5)
-      cz <- data.frame(xmin = -1.5, xmax = 1.5, ymin = 2.65 - 1.5, ymax = 2.65 + 1.5)
+      cz <- data.frame(xmin = -1.5, xmax = 1.5, ymin = 2.65 - 1.7, ymax = 2.65 + 1.3)
       sz <- data.frame(xmin = ZONE_LEFT, xmax = ZONE_RIGHT, ymin = ZONE_BOTTOM, ymax = ZONE_TOP)
       df_known <- dplyr::filter(df_i, !is.na(Result))
       df_other <- dplyr::filter(df_i,  is.na(Result))
@@ -6876,12 +6938,26 @@ mod_comp_server <- function(id, is_active = shiny::reactive(TRUE)) {
       }
     }
     
-    .dp_like_table <- function(df, mode, custom_cols) {
+    .dp_like_table <- function(df, mode, custom_cols, table_id = NULL) {
       if (!nrow(df)) {
         return(DT::datatable(
           data.frame(Message = "No data for selected filters"),
           options = list(dom = 't'), rownames = FALSE
         ))
+      }
+      cache_key <- if (is.null(table_id)) NULL else paste0("table_cache_", table_id)
+      store_table_cache <- function(tbl, extras = list()) {
+        if (is.null(cache_key)) return(invisible(NULL))
+        label_col <- extras$label_column %||% if ("Pitch" %in% names(tbl)) "Pitch" else names(tbl)[1]
+        session$userData[[cache_key]] <- c(
+          list(
+            table = tbl,
+            source = df,
+            label_column = label_col
+          ),
+          extras
+        )
+        invisible(NULL)
       }
       
       # --- helpers (copied from your DP page) ---
@@ -6953,7 +7029,7 @@ mod_comp_server <- function(id, is_active = shiny::reactive(TRUE)) {
             df$PlateLocHeight >= ZONE_BOTTOM & df$PlateLocHeight <= ZONE_TOP, 1.47,
           ifelse(
             df$PlateLocSide >= -1.5 & df$PlateLocSide <= 1.5 &
-              df$PlateLocHeight >= (2.65 - 1.5) & df$PlateLocHeight <= (2.65 + 1.5),
+              df$PlateLocHeight >= (2.65 - 1.7) & df$PlateLocHeight <= (2.65 + 1.3),
             0.73, 0
           )
         )
@@ -7124,12 +7200,17 @@ mod_comp_server <- function(id, is_active = shiny::reactive(TRUE)) {
           df_dt[[nm]] <- z
         }
         
+        store_table_cache(df_dt, list(label_column = "Pitch"))
+        disp_dt <- df_dt
+        if ("#" %in% names(disp_dt)) {
+          disp_dt$`#` <- wrap_pitch_counts(disp_dt$`#`)
+        }
         visible_set <- visible_set_for(mode, custom_cols)
         return(datatable_with_colvis(
-          df_dt,
+          disp_dt,
           lock            = "Pitch",
           remember        = FALSE,
-          default_visible = intersect(visible_set, names(df_dt))
+          default_visible = intersect(visible_set, names(disp_dt))
         ))
       }
       
@@ -7194,7 +7275,7 @@ mod_comp_server <- function(id, is_active = shiny::reactive(TRUE)) {
           df$PlateLocHeight >= ZONE_BOTTOM & df$PlateLocHeight <= ZONE_TOP, 1.47,
         ifelse(
           df$PlateLocSide >= -1.5 & df$PlateLocSide <= 1.5 &
-            df$PlateLocHeight >= (2.65-1.5) & df$PlateLocHeight <= (2.65+1.5),
+            df$PlateLocHeight >= (2.65-1.7) & df$PlateLocHeight <= (2.65+1.3),
           0.73, 0
         )
       )
@@ -7251,7 +7332,7 @@ mod_comp_server <- function(id, is_active = shiny::reactive(TRUE)) {
                                          df$PlateLocHeight >= ZONE_BOTTOM & df$PlateLocHeight <= ZONE_TOP)
           ifelse(sum(!is.na(inzone))>0, paste0(round(100*sum(inzone, na.rm=TRUE)/sum(!is.na(inzone)),1), "%"), "") },
           CompPercent   = { comp <- (df$PlateLocSide >= -1.5 & df$PlateLocSide <= 1.5 &
-                                       df$PlateLocHeight >= (2.65-1.5) & df$PlateLocHeight <= (2.65+1.5))
+                                       df$PlateLocHeight >= (2.65-1.7) & df$PlateLocHeight <= (2.65+1.3))
           ifelse(sum(!is.na(comp))>0, paste0(round(100*sum(comp, na.rm=TRUE)/sum(!is.na(comp)),1), "%"), "") },
           KPercent      = ifelse(bf_live>0, paste0(round(100*k_live/bf_live,1), "%"), ""),
           BBPercent     = ifelse(bf_live>0, paste0(round(100*bb_live/bf_live,1), "%"), ""),
@@ -7328,13 +7409,18 @@ mod_comp_server <- function(id, is_active = shiny::reactive(TRUE)) {
       
       df_table <- enforce_process_order(df_table)
       df_table <- enforce_stuff_order(df_table)
+      store_table_cache(df_table, list(label_column = "Pitch"))
+      disp_table <- df_table
+      if ("#" %in% names(disp_table)) {
+        disp_table$`#` <- wrap_pitch_counts(disp_table$`#`)
+      }
       
       visible_set <- visible_set_for(mode, custom_cols)
       datatable_with_colvis(
-        df_table,
+        disp_table,
         lock            = "Pitch",
         remember        = FALSE,
-        default_visible = intersect(visible_set, names(df_table))
+        default_visible = intersect(visible_set, names(disp_table))
       )
     }
     
@@ -7360,12 +7446,14 @@ mod_comp_server <- function(id, is_active = shiny::reactive(TRUE)) {
     output$cmpA_table <- DT::renderDataTable({
       .dp_like_table(.filtered_panel("A"),
                      if (is.null(input$cmpA_tableMode)) "Stuff" else input$cmpA_tableMode,
-                     input$cmpA_customCols)
+                     input$cmpA_customCols,
+                     table_id = ns("cmpA_table"))
     })
     output$cmpB_table <- DT::renderDataTable({
       .dp_like_table(.filtered_panel("B"),
                      if (is.null(input$cmpB_tableMode)) "Stuff" else input$cmpB_tableMode,
-                     input$cmpB_customCols)
+                     input$cmpB_customCols,
+                     table_id = ns("cmpB_table"))
     })
   })
 }
@@ -8351,80 +8439,35 @@ server <- function(input, output, session) {
     )
   }
   
-  show_pitch_video_modal_multi <- function(row, right_ui = NULL) {
-    edger  <- tryCatch(as.character(row$VideoClip  %||% "")[1],  error=function(e) "")
-    behind <- tryCatch(as.character(row$VideoClip2 %||% "")[1],  error=function(e) "")
-    side   <- tryCatch(as.character(row$VideoClip3 %||% "")[1],  error=function(e) "")
-    clips <- c(Edger=edger, Behind=behind, Side=side)
-    clips <- clips[nzchar(clips)]
-    urls <- lapply(names(clips), function(src) video_url_for(clips[[src]], source=src))
-    names(urls) <- names(clips)
-    urls <- urls[vapply(urls, nzchar, logical(1))]
-    
-    sel <- reactiveVal(if (length(urls)) names(urls)[1] else NA_character_)
-    
-    # ✅ FIX: don't multiply POSIXct; coerce to numeric first
-    tms <- as.integer(as.numeric(Sys.time()) * 1000)
-    uid <- paste0("pv_", tms %% 1e9)
-    pick_id <- paste0(uid, "_pick")
-    video_id <- paste0(uid, "_video")
-    
-    btn_row <- tags$div(style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;",
-                        lapply(c("Edger","Behind","Side"), function(src) {
-                          if (!is.null(urls[[src]])) actionButton(paste0(pick_id,"_",src), src)
-                        })
+  show_pitch_video_modal_multi <- function(row, right_ui = NULL, dataset = NULL, dataset_idx = NA_integer_) {
+    data_full <- dataset
+    if (is.null(data_full)) {
+      data_full <- tryCatch(as.data.frame(row, stringsAsFactors = FALSE), error = function(e) NULL)
+      if (is.null(data_full) || !nrow(data_full)) {
+        data_full <- data.frame()
+      }
+      dataset_idx <- 1L
+    }
+    data_full <- as.data.frame(data_full, stringsAsFactors = FALSE)
+    start_idx <- suppressWarnings(as.integer(dataset_idx))
+    if (!is.finite(start_idx) || start_idx < 1L) {
+      rn <- rownames(row)
+      if (length(rn)) {
+        start_idx <- suppressWarnings(as.integer(rn[1]))
+      }
+      if (!is.finite(start_idx) || start_idx < 1L) start_idx <- 1L
+    }
+    lbl <- tryCatch(as.character(row$TaggedPitchType)[1], error = function(e) NULL)
+    show_pitch_video_sequence(
+      rows = data_full,
+      label = lbl,
+      start_index = start_idx,
+      compare_pool = data_full,
+      primary_pool_idx = start_idx
     )
-    
-    for (src in names(urls)) local({
-      s <- src
-      observeEvent(input[[paste0(pick_id,"_",s)]], { sel(s) }, ignoreInit=TRUE)
-    })
-    
-    output[[video_id]] <- renderUI({
-      s <- sel()
-      url <- if (!is.null(s) && nzchar(s)) urls[[s]] else ""
-      
-      # cache-bust (this line was already fine)
-      if (nzchar(url)) {
-        url <- paste0(url, if (grepl("\\?",url)) "&" else "?", "v=", as.integer(as.numeric(Sys.time())))
-      }
-      
-      has_video <- nzchar(url)
-      video_core <- if (has_video) {
-        tags$video(src=url, controls=NA, autoplay=NA, type=guess_video_type(url),
-                   style="width:100%;max-height:78vh;background:#000;")
-      } else {
-        tags$div("No video available",
-                 style=paste("display:flex;align-items:center;justify-content:center;",
-                             "width:100%;max-height:78vh;height:60vh;background:#0b0b0b;",
-                             "color:#fff;font-weight:700;border-radius:8px;"))
-      }
-      
-      right_pane <- if (is.null(right_ui)) NULL else
-        tags$div(style=paste("display:flex;flex-direction:column;max-height:78vh;min-height:48vh;",
-                             "text-align:center;padding:0;"),
-                 tags$div(style="overflow:auto;flex:1 1 auto;padding:0 0 4px 0;", right_ui),
-                 tags$img(src="PCUlogo.png", alt="PCU",
-                          style=paste("align-self:center;margin-top:auto;margin-bottom:2px;",
-                                      "width:72px;height:auto;opacity:0.95;",
-                                      "filter:drop-shadow(0 1px 2px rgba(0,0,0,.6));",
-                                      "pointer-events:none;user-select:none;")))
-      
-      if (is.null(right_pane)) {
-        tags$div(btn_row, video_core)
-      } else {
-        tags$div(
-          btn_row,
-          tags$div(style=paste("display:grid;grid-template-columns:3.5fr 1fr;gap:16px;align-items:start;"),
-                   video_core, right_pane)
-        )
-      }
-    })
-    
-    showModal(modalDialog(uiOutput(video_id), easyClose=TRUE, footer=NULL, size="l"))
   }
   
-  # Bigger video (3.5fr) | narrower metrics (1fr) | centered logo low in metrics column
+  # Bigger video (4fr) | narrower metrics (1fr) | centered logo low in metrics column
   show_pitch_video_modal <- function(video_url, mime_type = "video", right_ui = NULL) {
     has_video <- nzchar(video_url)
     
@@ -8475,15 +8518,18 @@ server <- function(input, output, session) {
       tags$div(
         style = paste(
           "display:grid;",
-          "grid-template-columns: 3.5fr 1fr;",    # wider video, narrower metrics
-          "gap:16px; align-items:start;"
+          "grid-template-columns: 4fr 1fr;",    # wider video, narrower metrics
+          "gap:24px; align-items:start;"
         ),
         video_core,
         right_pane
       )
     }
-    
-    showModal(modalDialog(body, easyClose = TRUE, footer = NULL, size = "l"))
+
+    modal_css <- tags$style(HTML(
+      ".modal-dialog.pseq-wide{width:96%;max-width:1400px;}"
+    ))
+    showModal(tagList(modal_css, modalDialog(body, easyClose = TRUE, footer = NULL, size = "l", class = "pseq-wide")))
   }
   
   # Normalize ggiraph selection to a single integer (use the MOST RECENT click)
@@ -8502,9 +8548,879 @@ server <- function(input, output, session) {
     n <- nrow(df)
     if (!is.finite(idx) || is.na(idx) || n < 1L || idx < 1L || idx > n) return(invisible(FALSE))
     row <- df[idx, , drop = FALSE]
-    right <- build_metrics_panel(row)
-    show_pitch_video_modal_multi(row, right_ui = right)
+    show_pitch_video_modal_multi(row, dataset = df, dataset_idx = idx)
     invisible(TRUE)
+  }
+
+  summary_table_page_cache <- reactiveVal(NULL)
+  summary_table_cache      <- reactiveVal(NULL)
+
+  pitch_rows_for_label <- function(df, label) {
+    if (is.null(df) || !nrow(df)) return(df[0, , drop = FALSE])
+    lbl <- label %||% ""
+    lbl <- trimws(as.character(lbl))
+    if (!nzchar(lbl) || tolower(lbl) %in% c("all", "all pitches", "total", "totals")) return(df)
+    tp <- tryCatch(trimws(as.character(df$TaggedPitchType)), error = function(e) character(nrow(df)))
+    matches <- df[tp == lbl, , drop = FALSE]
+    if (!nrow(matches)) {
+      lbl_clean <- trimws(sub("\\s*\\(.*\\)$", "", lbl))
+      matches <- df[tp == lbl_clean, , drop = FALSE]
+    }
+    if (!nrow(matches)) {
+      matches <- df[tolower(tp) == tolower(lbl), , drop = FALSE]
+    }
+    matches
+  }
+
+  pitch_abbrev_for <- function(pt) {
+    pt_chr <- trimws(as.character(pt %||% ""))
+    if (!nzchar(pt_chr)) return("")
+    mapping <- c(
+      "Fastball" = "FB", "Four-Seam Fastball" = "FB", "4-Seam Fastball" = "FB",
+      "Sinker" = "SK", "Two-Seam Fastball" = "SK", "2-Seam Fastball" = "SK",
+      "Cutter" = "CT", "Cut Fastball" = "CT",
+      "Curveball" = "CB", "Curve" = "CB", "Knuckle Curve" = "CB",
+      "Slider" = "SL",
+      "Sweeper" = "SW",
+      "ChangeUp" = "CH", "Change Up" = "CH", "Changeup" = "CH",
+      "Splitter" = "SP", "Split Finger" = "SP", "Split-Finger" = "SP",
+      "Knuckleball" = "KN", "Knuckle Ball" = "KN",
+      "Gyro" = "SL", "Slurve" = "SL"
+    )
+    out <- mapping[pt_chr]
+    if (!is.na(out)) return(out)
+    parts <- strsplit(pt_chr, "[^A-Za-z]+")[[1]]
+    parts <- parts[nzchar(parts)]
+    if (!length(parts)) return(toupper(substr(pt_chr, 1, 2)))
+    abbr <- paste0(substring(parts, 1, 1), collapse = "")
+    toupper(substr(abbr, 1, 3))
+  }
+
+  format_initial_last <- function(name_chr) {
+    nm <- trimws(as.character(name_chr %||% ""))
+    if (!nzchar(nm)) return("")
+    nm_fmt <- format_name_first_last(nm)
+    parts <- strsplit(trimws(nm_fmt), "\\s+")[[1]]
+    parts <- parts[nzchar(parts)]
+    if (!length(parts)) return(nm_fmt)
+    if (length(parts) == 1) return(parts)
+    paste0(substr(parts[1], 1, 1), ". ", paste(parts[-1], collapse = " "))
+  }
+
+  make_pitch_option_label <- function(row, idx = NA_integer_) {
+    if (is.null(row) || !nrow(row)) return("Pitch")
+    date_val <- tryCatch(as.Date(row$Date[1]), error = function(e) NA)
+    date_txt <- if (inherits(date_val, "Date") && !is.na(date_val)) format(date_val, "%m/%d/%y") else ""
+    name_raw <- row$Pitcher[1] %||% row$PitcherName[1] %||% row$PlayerName[1]
+    name_txt <- format_initial_last(name_raw)
+    pt_txt <- pitch_abbrev_for(row$TaggedPitchType[1])
+    velo_val <- suppressWarnings(as.numeric(row$RelSpeed[1]))
+    ivb_val  <- suppressWarnings(as.numeric(row$InducedVertBreak[1]))
+    hb_val   <- suppressWarnings(as.numeric(row$HorzBreak[1]))
+    velo_txt <- if (is.finite(velo_val)) sprintf("%.1f mph", velo_val) else ""
+    ivb_txt  <- if (is.finite(ivb_val)) sprintf("%.1f\"", ivb_val) else ""
+    hb_txt   <- if (is.finite(hb_val)) sprintf("%.1f\"", hb_val) else ""
+    idx_txt  <- if (is.finite(idx)) paste0("#", idx) else ""
+    parts <- c(date_txt, name_txt, pt_txt, velo_txt, ivb_txt, hb_txt, idx_txt)
+    paste(parts[nzchar(parts)], collapse = " | ")
+  }
+
+  show_pitch_video_sequence <- function(rows, label = NULL, start_index = 1,
+                                        compare_pool = NULL, primary_pool_idx = NA_integer_) {
+    rows_df <- tryCatch(as.data.frame(rows), error = function(e) NULL)
+    if (is.null(rows_df) || !nrow(rows_df)) {
+      showModal(modalDialog("No video available for this selection.", easyClose = TRUE, footer = NULL))
+      return(invisible(FALSE))
+    }
+
+    rows_df <- as.data.frame(rows_df, stringsAsFactors = FALSE)
+    if (is.null(rownames(rows_df))) rownames(rows_df) <- as.character(seq_len(nrow(rows_df)))
+    n_total <- nrow(rows_df)
+    clip1 <- tryCatch(as.character(rows_df$VideoClip),  error = function(e) rep("", n_total))
+    clip2 <- tryCatch(as.character(rows_df$VideoClip2), error = function(e) rep("", n_total))
+    clip3 <- tryCatch(as.character(rows_df$VideoClip3), error = function(e) rep("", n_total))
+    has_video <- nzchar(clip1) | nzchar(clip2) | nzchar(clip3)
+    rows_vid <- rows_df[has_video, , drop = FALSE]
+    video_positions <- which(has_video)
+    if (!nrow(rows_vid)) {
+      showModal(modalDialog("No videos available for this selection.", easyClose = TRUE, footer = NULL))
+      return(invisible(FALSE))
+    }
+    pool_df <- if (!is.null(compare_pool)) {
+      tryCatch(as.data.frame(compare_pool, stringsAsFactors = FALSE), error = function(e) NULL)
+    } else rows_df
+    if (is.null(pool_df)) pool_df <- rows_df[0, , drop = FALSE]
+    if (is.null(rownames(pool_df))) rownames(pool_df) <- as.character(seq_len(nrow(pool_df)))
+
+    pool_clip1 <- tryCatch(as.character(pool_df$VideoClip),  error = function(e) rep("", nrow(pool_df)))
+    pool_clip2 <- tryCatch(as.character(pool_df$VideoClip2), error = function(e) rep("", nrow(pool_df)))
+    pool_clip3 <- tryCatch(as.character(pool_df$VideoClip3), error = function(e) rep("", nrow(pool_df)))
+    pool_has_video <- nzchar(pool_clip1) | nzchar(pool_clip2) | nzchar(pool_clip3)
+    pool_video_idx <- which(pool_has_video)
+    compare_available <- length(pool_video_idx) > 1
+
+    match_start <- match(suppressWarnings(as.integer(start_index)), video_positions)
+    if (is.na(match_start) || match_start < 1L) match_start <- 1L
+    if (match_start > nrow(rows_vid)) match_start <- nrow(rows_vid)
+
+    make_pitch_label <- function(dat, idx = NA_integer_) make_pitch_option_label(dat, idx)
+
+    collect_urls <- function(row) {
+      if (is.null(row) || !nrow(row)) return(list())
+      clips <- c(
+        Edger  = tryCatch(as.character(row$VideoClip)[1],  error = function(e) ""),
+        Behind = tryCatch(as.character(row$VideoClip2)[1], error = function(e) ""),
+        Side   = tryCatch(as.character(row$VideoClip3)[1], error = function(e) "")
+      )
+      clips <- clips[nzchar(clips)]
+      if (!length(clips)) return(list())
+      urls <- lapply(names(clips), function(src) video_url_for(clips[[src]], source = src))
+      names(urls) <- names(clips)
+      urls[vapply(urls, nzchar, logical(1))]
+    }
+
+    metrics_block <- function(content) {
+      if (is.null(content)) return(NULL)
+      tags$div(
+        style = paste(
+          "display:flex;flex-direction:column;",
+          "max-height:68vh;min-height:40vh;",
+          "text-align:center;padding:0;"
+        ),
+        tags$div(style = "overflow:auto;flex:1 1 auto;padding:0 0 4px 0;", content),
+        tags$img(
+          src = "PCUlogo.png", alt = "PCU",
+          style = paste(
+            "align-self:center;margin-top:auto;margin-bottom:2px;",
+            "width:72px;height:auto;opacity:0.95;",
+            "filter:drop-shadow(0 1px 2px rgba(0,0,0,.6));",
+            "pointer-events:none;user-select:none;"
+          )
+        )
+      )
+    }
+
+    default_secondary_for <- function(primary_idx) {
+      if (!length(pool_video_idx)) return(NA_integer_)
+      candidates <- pool_video_idx
+      if (is.finite(primary_idx)) candidates <- candidates[candidates != primary_idx]
+      if (!length(candidates)) candidates <- pool_video_idx
+      candidates[1]
+    }
+
+    idx <- reactiveVal(match_start)
+    cam_sel <- reactiveVal("")
+    compare_mode <- reactiveVal(FALSE)
+    secondary_idx <- reactiveVal(NA_integer_)
+    cmp_cam_sel <- reactiveVal("")
+
+    uid_base  <- paste0("pseq_", as.integer((as.numeric(Sys.time()) * 1000) %% 1e9))
+    video_id  <- paste0(uid_base, "_video")
+    next_id   <- paste0(uid_base, "_next")
+    prev_id   <- paste0(uid_base, "_prev")
+    cam_prefix <- paste0(uid_base, "_cam")
+    primary_video_id   <- paste0(uid_base, "_video_primary")
+    secondary_video_id <- paste0(uid_base, "_video_secondary")
+    compare_toggle_id  <- paste0(uid_base, "_compare")
+    primary_select_id  <- paste0(uid_base, "_primary_select")
+    compare_select_id  <- paste0(uid_base, "_compare_select")
+    cmp_cam_prefix     <- paste0(uid_base, "_cmpcam")
+    primary_slider_id  <- paste0(uid_base, "_slider_primary")
+    secondary_slider_id <- paste0(uid_base, "_slider_secondary")
+    sync_slider_id     <- paste0(uid_base, "_slider_sync")
+    primary_play_id    <- paste0(uid_base, "_play_primary")
+    primary_pause_id   <- paste0(uid_base, "_pause_primary")
+    secondary_play_id  <- paste0(uid_base, "_play_secondary")
+    secondary_pause_id <- paste0(uid_base, "_pause_secondary")
+    sync_play_id       <- paste0(uid_base, "_play_sync")
+    sync_pause_id      <- paste0(uid_base, "_pause_sync")
+    download_single_id <- paste0(uid_base, "_download_single")
+    download_all_id    <- paste0(uid_base, "_download_all")
+
+    current_row <- reactive({
+      i <- idx()
+      if (!is.finite(i)) i <- 1L
+      i <- max(1L, min(nrow(rows_vid), i))
+      rows_vid[i, , drop = FALSE]
+    })
+
+    current_urls <- reactive(collect_urls(current_row()))
+
+    primary_pool_idx_reactive <- reactive({
+      if (!nrow(pool_df)) return(NA_integer_)
+      row <- current_row()
+      if (is.null(row) || !nrow(row)) return(NA_integer_)
+      rn <- rownames(row)
+      if (length(rn)) {
+        match_idx <- match(rn[1], rownames(pool_df))
+        if (is.finite(match_idx)) return(match_idx)
+      }
+      if (is.finite(primary_pool_idx) && primary_pool_idx >= 1L && primary_pool_idx <= nrow(pool_df)) {
+        return(primary_pool_idx)
+      }
+      if (length(pool_video_idx)) pool_video_idx[1] else 1L
+    })
+
+    cmp_current_row <- reactive({
+      idx_val <- secondary_idx()
+      if (!is.finite(idx_val) || !nrow(pool_df)) return(NULL)
+      if (idx_val < 1L || idx_val > nrow(pool_df)) return(NULL)
+      if (!pool_has_video[idx_val]) return(NULL)
+      pool_df[idx_val, , drop = FALSE]
+    })
+
+    cmp_urls <- reactive(collect_urls(cmp_current_row()))
+
+    cam_names <- c("Edger", "Behind", "Side")
+
+    slugify <- function(text, fallback = "pitch") {
+      txt <- trimws(as.character(text %||% ""))
+      if (!nzchar(txt)) txt <- fallback
+      slug <- gsub("[^A-Za-z0-9]+", "-", txt)
+      slug <- gsub("-+", "-", slug)
+      slug <- gsub("(^-)|(-$)", "", slug)
+      slug <- tolower(slug)
+      if (!nzchar(slug)) tolower(fallback) else slug
+    }
+
+    file_ext_from_url <- function(url, default = ".mp4") {
+      if (!nzchar(url)) return(default)
+      clean <- sub("\\?.*$", "", url)
+      ext <- tools::file_ext(clean)
+      if (!nzchar(ext)) default else paste0(".", tolower(ext))
+    }
+
+    download_source_to <- function(url, dest) {
+      if (!nzchar(url)) stop("No source URL available", call. = FALSE)
+      dir.create(dirname(dest), recursive = TRUE, showWarnings = FALSE)
+      if (grepl("^https?://", url, ignore.case = TRUE)) {
+        req <- httr2::request(url)
+        tryCatch({
+          httr2::req_perform(req, path = dest)
+          TRUE
+        }, error = function(e) stop(sprintf("Failed to download %s", basename(url)), call. = FALSE))
+      } else {
+        rel <- sub("^/+", "", url)
+        rel <- utils::URLdecode(rel)
+        vdir <- getOption("PCU_VIDEOS_DIR", NA_character_)
+        if (is.na(vdir) || !nzchar(vdir)) {
+          stop("Local video directory is not configured", call. = FALSE)
+        }
+        parts <- strsplit(rel, "/", fixed = TRUE)[[1]]
+        if (length(parts) && identical(parts[1], "videos")) parts <- parts[-1]
+        abs_path <- do.call(file.path, c(list(vdir), as.list(parts)))
+        if (!length(parts) || !file.exists(abs_path)) {
+          stop("Video file not found on server", call. = FALSE)
+        }
+        if (!file.copy(abs_path, dest, overwrite = TRUE)) {
+          stop("Unable to copy video file", call. = FALSE)
+        }
+        TRUE
+      }
+    }
+
+    observeEvent(current_urls(), {
+      urls <- current_urls()
+      cur  <- cam_sel()
+      if (!length(urls)) {
+        cam_sel("")
+      } else if (!nzchar(cur) || !(cur %in% names(urls))) {
+        cam_sel(names(urls)[1])
+      }
+    }, ignoreNULL = FALSE, priority = 1)
+
+    observeEvent(cmp_urls(), {
+      urls <- cmp_urls()
+      cur <- cmp_cam_sel()
+      if (!length(urls)) {
+        cmp_cam_sel("")
+      } else if (!nzchar(cur) || !(cur %in% names(urls))) {
+        cmp_cam_sel(names(urls)[1])
+      }
+    }, ignoreNULL = FALSE, priority = 1)
+
+    for (nm in cam_names) local({
+      src <- nm
+      observeEvent(input[[paste0(cam_prefix, "_", src)]], {
+        urls <- current_urls()
+        if (length(urls) && !is.null(urls[[src]]) && nzchar(urls[[src]])) {
+          cam_sel(src)
+        }
+      }, ignoreNULL = TRUE)
+    })
+
+    for (nm in cam_names) local({
+      src <- nm
+      observeEvent(input[[paste0(cmp_cam_prefix, "_", src)]], {
+        urls <- cmp_urls()
+        if (length(urls) && !is.null(urls[[src]]) && nzchar(urls[[src]])) {
+          cmp_cam_sel(src)
+        }
+      }, ignoreNULL = TRUE)
+    })
+
+    observeEvent(input[[next_id]], {
+      cur <- idx()
+      if (is.finite(cur) && cur < nrow(rows_vid)) idx(cur + 1L)
+    }, ignoreNULL = TRUE)
+
+    observeEvent(input[[prev_id]], {
+      cur <- idx()
+      if (is.finite(cur) && cur > 1) idx(cur - 1L)
+    }, ignoreNULL = TRUE)
+
+    observeEvent(input[[compare_toggle_id]], {
+      if (!compare_available) return()
+      compare_mode(!compare_mode())
+    }, ignoreNULL = TRUE)
+
+    observeEvent(compare_mode(), {
+      if (compare_mode()) {
+        primary_idx <- primary_pool_idx_reactive()
+        secondary_idx(default_secondary_for(primary_idx))
+        if (compare_available && is.finite(primary_idx)) {
+          updateSelectizeInput(session, primary_select_id, selected = as.character(primary_idx))
+        }
+      } else {
+        secondary_idx(NA_integer_)
+      }
+    }, ignoreNULL = TRUE)
+
+    observeEvent(idx(), {
+      if (!compare_available) return()
+      if (!compare_mode()) return()
+      primary_idx <- primary_pool_idx_reactive()
+      current_sec <- secondary_idx()
+      if (!is.finite(current_sec) || !pool_has_video[current_sec] || identical(current_sec, primary_idx)) {
+        secondary_idx(default_secondary_for(primary_idx))
+      }
+      if (is.finite(primary_idx)) {
+        updateSelectizeInput(session, primary_select_id, selected = as.character(primary_idx))
+      }
+    }, ignoreNULL = TRUE)
+
+    observeEvent(secondary_idx(), {
+      if (!compare_available) return()
+      if (!compare_mode()) return()
+      val <- secondary_idx()
+      updateSelectizeInput(session, compare_select_id,
+                           selected = if (is.finite(val)) as.character(val) else NULL)
+    }, ignoreNULL = FALSE)
+
+    observeEvent(input[[primary_select_id]], {
+      if (!compare_available) return()
+      if (!compare_mode()) return()
+      val <- suppressWarnings(as.integer(input[[primary_select_id]]))
+      if (!is.finite(val)) return()
+      target_idx <- match(val, video_positions)
+      if (is.finite(target_idx)) idx(target_idx)
+    }, ignoreNULL = TRUE)
+
+    observeEvent(input[[compare_select_id]], {
+      if (!compare_available) return()
+      val <- suppressWarnings(as.integer(input[[compare_select_id]]))
+      if (is.finite(val) && val >= 1L && val <= nrow(pool_df) && pool_has_video[val]) {
+        secondary_idx(val)
+      }
+    }, ignoreNULL = TRUE)
+
+    output[[download_single_id]] <- downloadHandler(
+      filename = function() {
+        row <- current_row()
+        idx_val <- primary_pool_idx_reactive()
+        label <- make_pitch_option_label(row, idx_val)
+        cam <- cam_sel()
+        if (!nzchar(cam)) cam <- "video"
+        urls <- current_urls()
+        url <- urls[[cam]] %||% ""
+        ext <- file_ext_from_url(url)
+        paste0(slugify(label, fallback = "pitch"), "-", tolower(cam), ext)
+      },
+      content = function(file) {
+        urls <- current_urls()
+        sel <- cam_sel()
+        if (!length(urls) || !nzchar(sel) || is.null(urls[[sel]]) || !nzchar(urls[[sel]])) {
+          stop("No video available for download", call. = FALSE)
+        }
+        download_source_to(urls[[sel]], file)
+      }
+    )
+
+    output[[download_all_id]] <- downloadHandler(
+      filename = function() {
+        base <- if (!is.null(label) && nzchar(label)) label else "selection"
+        paste0(slugify(base, fallback = "pitch"), "-videos.zip")
+      },
+      content = function(file) {
+        if (!length(pool_video_idx)) {
+          stop("No videos available in this filter", call. = FALSE)
+        }
+        rows_all <- pool_df[pool_video_idx, , drop = FALSE]
+        if (!nrow(rows_all)) {
+          stop("No videos available in this filter", call. = FALSE)
+        }
+        tmpdir <- tempfile("pseq_dl_")
+        dir.create(tmpdir, recursive = TRUE, showWarnings = FALSE)
+        on.exit(unlink(tmpdir, recursive = TRUE, force = TRUE), add = TRUE)
+
+        saved <- character(0)
+        done_map <- character(0)
+
+        for (pos in seq_along(pool_video_idx)) {
+          idx_val <- pool_video_idx[pos]
+          row_now <- pool_df[idx_val, , drop = FALSE]
+          slug <- slugify(make_pitch_option_label(row_now, idx_val), fallback = sprintf("pitch-%03d", idx_val))
+          urls <- collect_urls(row_now)
+          if (!length(urls)) next
+          for (cam in names(urls)) {
+            url <- urls[[cam]]
+            if (!nzchar(url)) next
+            key <- paste(url, cam, sep = "::")
+            if (key %in% done_map) next
+            done_map <- c(done_map, key)
+            ext <- file_ext_from_url(url)
+            dest_name <- sprintf("%03d_%s_%s%s", pos, slug, tolower(cam), ext)
+            dest_path <- file.path(tmpdir, dest_name)
+            download_source_to(url, dest_path)
+            saved <- c(saved, dest_path)
+          }
+        }
+
+        if (!length(saved)) {
+          stop("No downloadable videos were found", call. = FALSE)
+        }
+
+        zipfile <- normalizePath(file, mustWork = FALSE)
+        oldwd <- getwd()
+        setwd(tmpdir)
+        on.exit(setwd(oldwd), add = TRUE)
+        utils::zip(zipfile = zipfile, files = basename(saved))
+      }
+    )
+
+    output[[video_id]] <- renderUI({
+      i <- idx()
+      if (!is.finite(i)) i <- 1L
+      i <- max(1L, min(nrow(rows_vid), i))
+      row <- rows_vid[i, , drop = FALSE]
+      urls <- current_urls()
+      sel <- cam_sel()
+      if ((!nzchar(sel) || !(sel %in% names(urls))) && length(urls)) {
+        sel <- names(urls)[1]
+      }
+      url <- if (length(urls) && nzchar(sel) && !is.null(urls[[sel]])) urls[[sel]] else ""
+      if (nzchar(url)) {
+        cache_tag <- as.integer(as.numeric(Sys.time()))
+        url <- paste0(url, if (grepl("\\?", url)) "&" else "?", "v=", cache_tag)
+      }
+
+      right <- build_metrics_panel(row)
+      seq_txt <- sprintf("%d of %d", i, nrow(rows_vid))
+
+      compare_btn_label <- if (isTRUE(compare_mode())) tagList(icon("video"), "Single View") else tagList(icon("columns"), "Side-by-Side")
+      compare_btn <- actionButton(
+        compare_toggle_id,
+        label = compare_btn_label,
+        class = "btn btn-sm btn-outline-secondary",
+        style = "min-width:128px;font-weight:600;",
+        disabled = if (compare_available) NULL else "disabled"
+      )
+
+      download_controls <- tags$div(
+        style = "display:flex;justify-content:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;",
+        downloadButton(
+          download_single_id,
+          label = tagList(icon("download"), "Download Pitch"),
+          class = "btn btn-sm btn-outline-secondary"
+        ),
+        downloadButton(
+          download_all_id,
+          label = tagList(icon("file-archive"), "Download Filter"),
+          class = "btn btn-sm btn-outline-secondary",
+          title = "Downloads all available camera angles in this filter as a ZIP"
+        )
+      )
+
+      header <- tags$div(
+        style = "display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;",
+        actionButton(
+          prev_id,
+          label = tagList(icon("chevron-left"), "Prev"),
+          class = "btn-light btn-sm",
+          style = "min-width:92px;",
+          disabled = if (i <= 1) "disabled" else NULL
+        ),
+        tags$div(
+          style = "flex:1;text-align:center;",
+          tags$div(style = "font-size:0.9rem;font-weight:600;opacity:0.75;", seq_txt)
+        ),
+        actionButton(
+          next_id,
+          label = tagList("Next", icon("chevron-right")),
+          class = "btn-light btn-sm",
+          style = "min-width:92px;",
+          disabled = if (i >= nrow(rows_vid)) "disabled" else NULL
+        )
+      )
+
+      cam_buttons <- lapply(cam_names, function(src) {
+        u <- urls[[src]]
+        if (is.null(u) || !nzchar(u)) return(NULL)
+        btn_class <- if (identical(sel, src)) "btn-sm btn-primary" else "btn-sm btn-outline-secondary"
+        actionButton(
+          paste0(cam_prefix, "_", src),
+          label = src,
+          class = btn_class,
+          style = "min-width:82px;font-weight:600;"
+        )
+      })
+      cam_buttons <- Filter(Negate(is.null), cam_buttons)
+      cam_row <- if (length(cam_buttons)) {
+        tags$div(
+          style = "display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;justify-content:center;",
+          cam_buttons
+        )
+      } else NULL
+
+      video_style <- if (isTRUE(compare_mode())) "width:100%;max-height:60vh;background:#000;" else "width:100%;max-height:78vh;background:#000;"
+      placeholder_style <- if (isTRUE(compare_mode()))
+        "display:flex;align-items:center;justify-content:center;width:100%;max-height:60vh;height:44vh;background:#0b0b0b;color:#fff;font-weight:700;border-radius:8px;"
+      else
+        "display:flex;align-items:center;justify-content:center;width:100%;max-height:78vh;height:60vh;background:#0b0b0b;color:#fff;font-weight:700;border-radius:8px;"
+
+      video_core <- if (nzchar(url)) {
+        tags$video(
+          id = primary_video_id,
+          src = url,
+          controls = NA,
+          autoplay = NA,
+          type = guess_video_type(url),
+          style = video_style
+        )
+      } else {
+        tags$div("No video available", style = placeholder_style)
+      }
+
+      compare_choices <- if (compare_available) {
+        labs <- vapply(pool_video_idx, function(idx_val) make_pitch_option_label(pool_df[idx_val, , drop = FALSE], idx_val), character(1))
+        stats::setNames(as.character(pool_video_idx), labs)
+      } else character(0)
+
+      if (!isTRUE(compare_mode())) {
+        right_pane <- metrics_block(right)
+        main_layout <- if (is.null(right_pane)) {
+          video_core
+        } else {
+          tags$div(
+            style = paste(
+              "display:grid;",
+              "grid-template-columns:4fr 1fr;",
+              "gap:24px;align-items:start;"
+            ),
+            video_core,
+            right_pane
+          )
+        }
+
+        tagList(
+          header,
+          tags$div(style = "display:flex;justify-content:center;margin-bottom:10px;", compare_btn),
+          cam_row,
+          download_controls,
+          main_layout
+        )
+      } else {
+        cmp_row <- cmp_current_row()
+        cmp_sel <- cmp_cam_sel()
+        cmp_urls_now <- cmp_urls()
+        if ((!nzchar(cmp_sel) || !(cmp_sel %in% names(cmp_urls_now))) && length(cmp_urls_now)) {
+          cmp_sel <- names(cmp_urls_now)[1]
+        }
+        cmp_url <- if (length(cmp_urls_now) && nzchar(cmp_sel) && !is.null(cmp_urls_now[[cmp_sel]])) cmp_urls_now[[cmp_sel]] else ""
+        if (nzchar(cmp_url)) {
+          cache_tag <- as.integer(as.numeric(Sys.time()))
+          cmp_url <- paste0(cmp_url, if (grepl("\\?", cmp_url)) "&" else "?", "v=", cache_tag)
+        }
+
+        cmp_cam_buttons <- lapply(cam_names, function(src) {
+          u <- cmp_urls_now[[src]]
+          if (is.null(u) || !nzchar(u)) return(NULL)
+          btn_class <- if (identical(cmp_sel, src)) "btn-sm btn-primary" else "btn-sm btn-outline-secondary"
+          actionButton(
+            paste0(cmp_cam_prefix, "_", src),
+            label = src,
+            class = btn_class,
+            style = "min-width:82px;font-weight:600;"
+          )
+        })
+        cmp_cam_buttons <- Filter(Negate(is.null), cmp_cam_buttons)
+        cmp_cam_row <- if (length(cmp_cam_buttons)) {
+          tags$div(
+            style = "display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;justify-content:center;",
+            cmp_cam_buttons
+          )
+        } else NULL
+
+        cmp_video_core <- if (nzchar(cmp_url)) {
+          tags$video(
+            id = secondary_video_id,
+            src = cmp_url,
+            controls = NA,
+            autoplay = NA,
+            type = guess_video_type(cmp_url),
+            style = video_style
+          )
+        } else {
+          tags$div("Select a pitch", style = placeholder_style)
+        }
+
+        left_metrics_block <- metrics_block(right)
+        right_metrics_block <- metrics_block(if (!is.null(cmp_row)) build_metrics_panel(cmp_row) else NULL)
+
+        primary_selected_val <- primary_pool_idx_reactive()
+        secondary_selected_val <- secondary_idx()
+
+        selector <- if (compare_available) {
+          tags$div(
+            style = "display:flex;justify-content:center;gap:16px;margin-bottom:12px;flex-wrap:wrap;",
+            tags$div(
+              style = "display:flex;flex-direction:column;min-width:220px;gap:4px;",
+              tags$label("Primary Pitch", `for` = primary_select_id, style = "margin:0;font-weight:600;"),
+              selectizeInput(
+                primary_select_id,
+                label = NULL,
+                choices = compare_choices,
+                selected = {
+                  if (is.finite(primary_selected_val)) as.character(primary_selected_val)
+                  else if (length(compare_choices)) compare_choices[[1]] else NULL
+                },
+                options = list(placeholder = "Choose primary pitch")
+              )
+            ),
+            tags$div(
+              style = "display:flex;flex-direction:column;min-width:220px;gap:4px;",
+              tags$label("Secondary Pitch", `for` = compare_select_id, style = "margin:0;font-weight:600;"),
+              selectizeInput(
+                compare_select_id,
+                label = NULL,
+                choices = compare_choices,
+                selected = {
+                  if (is.finite(secondary_selected_val)) as.character(secondary_selected_val)
+                  else if (length(compare_choices)) compare_choices[[1]] else NULL
+                },
+                options = list(placeholder = "Choose secondary pitch")
+              )
+            )
+          )
+        } else NULL
+
+        primary_controls <- if (compare_available) {
+          tags$div(
+            style = "display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;justify-content:center;",
+            actionButton(primary_play_id, label = "Play", icon = icon("play"), class = "btn btn-sm btn-outline-secondary"),
+            actionButton(primary_pause_id, label = "Pause", icon = icon("pause"), class = "btn btn-sm btn-outline-secondary"),
+            tags$input(
+              id = primary_slider_id,
+              type = "range",
+              min = "0",
+              max = "1",
+              step = "0.01",
+              value = "0",
+              style = "flex:1 1 260px;min-width:220px;"
+            )
+          )
+        } else NULL
+
+        secondary_controls <- if (compare_available) {
+          tags$div(
+            style = "display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;justify-content:center;",
+            actionButton(secondary_play_id, label = "Play", icon = icon("play"), class = "btn btn-sm btn-outline-secondary"),
+            actionButton(secondary_pause_id, label = "Pause", icon = icon("pause"), class = "btn btn-sm btn-outline-secondary"),
+            tags$input(
+              id = secondary_slider_id,
+              type = "range",
+              min = "0",
+              max = "1",
+              step = "0.01",
+              value = "0",
+              style = "flex:1 1 260px;min-width:220px;"
+            )
+          )
+        } else NULL
+
+        sync_controls <- if (compare_available) {
+          tags$div(
+            style = "display:flex;align-items:center;gap:12px;margin:-4px 0 12px 0;flex-wrap:wrap;justify-content:center;",
+            tags$label(
+              "Sync Scrub",
+              `for` = sync_slider_id,
+              style = "margin:0;font-weight:600;min-width:96px;text-align:right;"
+            ),
+            tags$input(
+              id = sync_slider_id,
+              type = "range",
+              min = "0",
+              max = "1",
+              step = "0.01",
+              value = "0",
+              style = "flex:1 1 360px;min-width:260px;"
+            ),
+            actionButton(sync_play_id, label = "Play", icon = icon("play"), class = "btn btn-sm btn-outline-secondary"),
+            actionButton(sync_pause_id, label = "Pause", icon = icon("pause"), class = "btn btn-sm btn-outline-secondary")
+          )
+        } else NULL
+
+        left_col <- tags$div(
+          style = "display:flex;flex-direction:column;gap:10px;",
+          cam_row,
+          primary_controls,
+          video_core,
+          left_metrics_block
+        )
+
+        right_col <- tags$div(
+          style = "display:flex;flex-direction:column;gap:10px;",
+          cmp_cam_row,
+          secondary_controls,
+          cmp_video_core,
+          right_metrics_block
+        )
+
+        control_script <- if (compare_available) {
+          tags$script(HTML(sprintf(
+            "(function(){\n  var configs = [\n    {videoId:'%s', sliderId:'%s', playId:'%s', pauseId:'%s'},\n    {videoId:'%s', sliderId:'%s', playId:'%s', pauseId:'%s'}\n  ];\n  var syncSlider = document.getElementById('%s');\n  var syncPlayBtn = document.getElementById('%s');\n  var syncPauseBtn = document.getElementById('%s');\n  var syncUpdating = false;\n\n  function playSafe(video){\n    if (!video) return;\n    try {\n      var p = video.play();\n      if (p && typeof p.catch === 'function') p.catch(function(){});\n    } catch(e){}\n  }\n\n  function pauseSafe(video){\n    if (!video) return;\n    try { video.pause(); } catch(e){}\n  }\n\n  function updateSyncRange(){\n    if (!syncSlider) return;\n    var maxDur = Infinity;\n    configs.forEach(function(cfg){\n      if (!cfg.video) return;\n      var d = cfg.video.duration;\n      if (isFinite(d) && d > 0 && d < maxDur) maxDur = d;\n    });\n    if (!isFinite(maxDur) || maxDur === Infinity){\n      syncSlider.disabled = true;\n    } else {\n      syncSlider.max = maxDur;\n      syncSlider.disabled = false;\n    }\n  }\n\n  function updateSyncValue(){\n    if (!syncSlider || syncUpdating) return;\n    var minTime = Infinity;\n    configs.forEach(function(cfg){\n      if (!cfg.video) return;\n      var t = cfg.video.currentTime;\n      if (isFinite(t) && t < minTime) minTime = t;\n    });\n    if (minTime !== Infinity) syncSlider.value = minTime;\n  }\n\n  configs.forEach(function(cfg){\n    cfg.video = document.getElementById(cfg.videoId);\n    cfg.slider = document.getElementById(cfg.sliderId);\n    cfg.playBtn = document.getElementById(cfg.playId);\n    cfg.pauseBtn = document.getElementById(cfg.pauseId);\n    if (!cfg.video) return;\n    var video = cfg.video;\n    var slider = cfg.slider;\n    var updating = false;\n\n    function setRange(){\n      if (!slider) return;\n      if (isFinite(video.duration) && video.duration > 0){\n        slider.max = video.duration;\n        slider.disabled = false;\n      } else {\n        slider.disabled = true;\n      }\n    }\n\n    video.addEventListener('loadedmetadata', function(){\n      setRange();\n      updateSyncRange();\n      if (slider) slider.value = video.currentTime || 0;\n      updateSyncValue();\n    });\n\n    video.addEventListener('timeupdate', function(){\n      if (updating) return;\n      setRange();\n      if (slider) slider.value = video.currentTime || 0;\n      updateSyncRange();\n      updateSyncValue();\n    });\n\n    if (slider){\n      slider.addEventListener('input', function(){\n        updating = true;\n        var val = parseFloat(slider.value) || 0;\n        try { video.currentTime = val; } catch(e){}\n      });\n      slider.addEventListener('change', function(){\n        updating = false;\n      });\n    }\n\n    if (cfg.playBtn){\n      cfg.playBtn.addEventListener('click', function(){\n        playSafe(video);\n      });\n    }\n\n    if (cfg.pauseBtn){\n      cfg.pauseBtn.addEventListener('click', function(){\n        pauseSafe(video);\n      });\n    }\n  });\n\n  if (syncSlider){\n    syncSlider.addEventListener('input', function(){\n      syncUpdating = true;\n      var val = parseFloat(syncSlider.value) || 0;\n      var actual = Infinity;\n      configs.forEach(function(cfg){\n        if (!cfg.video) return;\n        var target = val;\n        var dur = cfg.video.duration;\n        if (isFinite(dur) && dur > 0 && target > dur) target = dur;\n        try { cfg.video.currentTime = target; } catch(e){}\n        if (cfg.slider) cfg.slider.value = target;\n        var ct = cfg.video.currentTime;\n        if (isFinite(ct) && ct < actual) actual = ct;\n      });\n      if (actual !== Infinity) syncSlider.value = actual;\n    });\n    syncSlider.addEventListener('change', function(){\n      syncUpdating = false;\n    });\n    updateSyncRange();\n    updateSyncValue();\n  }\n\n  if (syncPlayBtn){\n    syncPlayBtn.addEventListener('click', function(){\n      configs.forEach(function(cfg){ playSafe(cfg.video); });\n    });\n  }\n\n  if (syncPauseBtn){\n    syncPauseBtn.addEventListener('click', function(){\n      configs.forEach(function(cfg){ pauseSafe(cfg.video); });\n    });\n  }\n})();",
+            primary_video_id, primary_slider_id, primary_play_id, primary_pause_id,
+            secondary_video_id, secondary_slider_id, secondary_play_id, secondary_pause_id,
+            sync_slider_id, sync_play_id, sync_pause_id)))
+        } else NULL
+
+        tagList(
+          header,
+          tags$div(style = "display:flex;justify-content:center;margin-bottom:10px;", compare_btn),
+          selector,
+          sync_controls,
+          download_controls,
+          tags$div(
+            style = "display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;",
+            left_col,
+            right_col
+          ),
+          control_script
+        )
+      }
+    })
+
+    modal_css <- tags$style(HTML(
+      ".modal-dialog.pseq-wide{width:96%;max-width:1400px;}"
+    ))
+    showModal(tagList(modal_css, modalDialog(uiOutput(video_id), easyClose = TRUE, footer = NULL, size = "l", class = "pseq-wide")))
+    invisible(TRUE)
+  }
+
+  handle_pitch_table_click <- function(info, cache_fn, table_label = NULL) {
+    if (is.null(info)) return(invisible(FALSE))
+    col_raw <- info$col %||% info$column
+    row_raw <- info$row %||% info$rows
+    if (is.null(col_raw) || is.null(row_raw)) return(invisible(FALSE))
+    col_idx <- suppressWarnings(as.integer(col_raw))
+    row_idx <- suppressWarnings(as.integer(row_raw))
+    if (is.finite(col_idx)) col_idx <- col_idx + 1L  # DT supplies 0-based column index
+    if (is.finite(row_idx) && row_idx < 1L) row_idx <- row_idx + 1L
+    cache_obj <- cache_fn()
+    if (is.null(cache_obj)) return(invisible(FALSE))
+
+    if (inherits(cache_obj, "data.frame")) {
+      df_tbl <- cache_obj
+      meta <- list()
+    } else if (is.list(cache_obj)) {
+      df_tbl <- cache_obj$table %||% cache_obj$data %||% cache_obj
+      meta <- cache_obj
+    } else {
+      return(invisible(FALSE))
+    }
+
+    if (is.null(df_tbl) || !nrow(df_tbl)) return(invisible(FALSE))
+    if (!is.finite(col_idx) || col_idx < 1 || col_idx > ncol(df_tbl)) return(invisible(FALSE))
+    if (!is.finite(row_idx) || row_idx < 1 || row_idx > nrow(df_tbl)) return(invisible(FALSE))
+
+    col_name <- names(df_tbl)[col_idx]
+    if (!identical(col_name, "#")) return(invisible(FALSE))
+    cell_val <- df_tbl[row_idx, col_idx]
+
+    label_col <- meta$label_column %||% {
+      if ("Pitch" %in% names(df_tbl)) "Pitch"
+      else if ("Player" %in% names(df_tbl)) "Player"
+      else names(df_tbl)[1]
+    }
+    if (!label_col %in% names(df_tbl)) label_col <- names(df_tbl)[1]
+    pitch_label <- tryCatch(as.character(df_tbl[row_idx, label_col])[1], error = function(e) "")
+    pitch_label <- trimws(pitch_label)
+
+    rows <- NULL
+
+    if (!is.null(meta$row_mapper) && is.function(meta$row_mapper)) {
+      rows <- tryCatch(meta$row_mapper(pitch_label, row_idx, meta), error = function(e) NULL)
+    }
+
+    if ((is.null(rows) || !nrow(rows)) && !is.null(meta$groups)) {
+      grp <- meta$groups
+      key_opts <- c(pitch_label,
+                    trimws(sub("\\s*\\(.*\\)$", "", pitch_label)),
+                    tolower(pitch_label))
+      key_opts <- unique(key_opts[nzchar(key_opts)])
+      for (k in key_opts) {
+        if (!nzchar(k)) next
+        if (!is.null(grp[[k]])) {
+          rows <- grp[[k]]
+          break
+        }
+      }
+      if ((is.null(rows) || !nrow(rows)) && length(grp)) {
+        nm_match <- which(tolower(names(grp)) == tolower(pitch_label))
+        if (length(nm_match)) rows <- grp[[nm_match[1]]]
+      }
+    }
+
+    if ((is.null(rows) || !nrow(rows)) && !is.null(meta$source)) {
+      rows <- pitch_rows_for_label(meta$source, pitch_label)
+    }
+
+    if ((is.null(rows) || !nrow(rows)) && !is.null(meta$fallback_source)) {
+      rows <- pitch_rows_for_label(meta$fallback_source, pitch_label)
+    }
+
+    if (is.null(rows) || !nrow(rows)) {
+      df_all <- filtered_data()
+      if (!is.null(df_all) && nrow(df_all)) {
+        rows <- pitch_rows_for_label(df_all, pitch_label)
+      }
+    }
+
+    if (is.null(rows) || !nrow(rows)) {
+      showModal(modalDialog("No pitches found for this table row.", easyClose = TRUE, footer = NULL))
+      return(invisible(FALSE))
+    }
+
+    rows <- as.data.frame(rows, stringsAsFactors = FALSE)
+    if (is.null(rownames(rows))) {
+      rownames(rows) <- as.character(seq_len(nrow(rows)))
+    }
+
+    start_idx <- 1L
+
+    show_pitch_video_sequence(
+      rows,
+      label = if (nzchar(pitch_label)) pitch_label else table_label,
+      start_index = start_idx,
+      compare_pool = rows,
+      primary_pool_idx = start_idx
+    )
+    invisible(TRUE)
+  }
+
+  table_cache_fetcher <- function(id) {
+    force(id)
+    function() session$userData[[paste0("table_cache_", id)]]
   }
   
   
@@ -8538,6 +9454,38 @@ server <- function(input, output, session) {
     open_clip_from_df_and_index(df, input[["summary_zonePlot_selected"]])
   })
   
+  observeEvent(input[["leader-lbTable_cell_clicked"]], {
+    handle_pitch_table_click(
+      input[["leader-lbTable_cell_clicked"]],
+      table_cache_fetcher("leader-lbTable"),
+      table_label = "Leaderboard"
+    )
+  }, ignoreNULL = TRUE)
+
+  observeEvent(input[["leader-lbCatchTable_cell_clicked"]], {
+    handle_pitch_table_click(
+      input[["leader-lbCatchTable_cell_clicked"]],
+      table_cache_fetcher("leader-lbCatchTable"),
+      table_label = "Leaderboard"
+    )
+  }, ignoreNULL = TRUE)
+
+  observeEvent(input[["comp-cmpA_table_cell_clicked"]], {
+    handle_pitch_table_click(
+      input[["comp-cmpA_table_cell_clicked"]],
+      table_cache_fetcher("comp-cmpA_table"),
+      table_label = "Comparison"
+    )
+  }, ignoreNULL = TRUE)
+
+  observeEvent(input[["comp-cmpB_table_cell_clicked"]], {
+    handle_pitch_table_click(
+      input[["comp-cmpB_table_cell_clicked"]],
+      table_cache_fetcher("comp-cmpB_table"),
+      table_label = "Comparison"
+    )
+  }, ignoreNULL = TRUE)
+
   
   session_label_from <- function(df) {
     s <- unique(na.omit(as.character(df$SessionType)))
@@ -9212,6 +10160,17 @@ server <- function(input, output, session) {
     df <- enforce_inzone(df, input$inZone)
     df <- apply_count_filter(df, input$countFilter)
     
+    # Video filter
+    if (!is.null(input$videoFilter) && input$videoFilter != "All") {
+      if (input$videoFilter == "Edger") {
+        df <- dplyr::filter(df, !is.na(VideoClip) & nzchar(VideoClip))
+      } else if (input$videoFilter == "Behind") {
+        df <- dplyr::filter(df, !is.na(VideoClip2) & nzchar(VideoClip2))
+      } else if (input$videoFilter == "Side") {
+        df <- dplyr::filter(df, !is.na(VideoClip3) & nzchar(VideoClip3))
+      }
+    }
+    
     # Numeric ranges
     if (nnz(input$veloMin)) df <- dplyr::filter(df, RelSpeed         >= input$veloMin)
     if (nnz(input$veloMax)) df <- dplyr::filter(df, RelSpeed         <= input$veloMax)
@@ -9278,6 +10237,18 @@ server <- function(input, output, session) {
     df <- enforce_zone(df, input$zoneLoc)
     df <- enforce_inzone(df, input$inZone)
     df <- apply_count_filter(df, input$countFilter)
+    
+    # Video filter
+    if (!is.null(input$videoFilter) && input$videoFilter != "All") {
+      if (input$videoFilter == "Edger") {
+        df <- dplyr::filter(df, !is.na(VideoClip) & nzchar(VideoClip))
+      } else if (input$videoFilter == "Behind") {
+        df <- dplyr::filter(df, !is.na(VideoClip2) & nzchar(VideoClip2))
+      } else if (input$videoFilter == "Side") {
+        df <- dplyr::filter(df, !is.na(VideoClip3) & nzchar(VideoClip3))
+      }
+    }
+    
     if (!is.na(input$veloMin)) df <- dplyr::filter(df, RelSpeed >= input$veloMin)
     if (!is.na(input$veloMax)) df <- dplyr::filter(df, RelSpeed <= input$veloMax)
     if (!is.na(input$ivbMin))  df <- dplyr::filter(df, InducedVertBreak >= input$ivbMin)
@@ -9357,7 +10328,7 @@ server <- function(input, output, session) {
           df$PlateLocHeight >= ZONE_BOTTOM & df$PlateLocHeight <= ZONE_TOP, 1.47,
         ifelse(
           df$PlateLocSide >= -1.5 & df$PlateLocSide <= 1.5 &
-            df$PlateLocHeight >= (2.65 - 1.5) & df$PlateLocHeight <= (2.65 + 1.5),
+            df$PlateLocHeight >= (2.65 - 1.7) & df$PlateLocHeight <= (2.65 + 1.3),
           0.73, 0
         )
       )
@@ -9771,7 +10742,7 @@ server <- function(input, output, session) {
       x = c(-0.75, 0.75, 0.75, 0, -0.75),
       y = c(1.05, 1.05, 1.15, 1.25, 1.15) - 0.5
     )
-    cz <- data.frame(xmin = -1.5, xmax = 1.5, ymin = 2.65 - 1.5, ymax = 2.65 + 1.5)
+    cz <- data.frame(xmin = -1.5, xmax = 1.5, ymin = 2.65 - 1.7, ymax = 2.65 + 1.3)
     sz <- data.frame(xmin = ZONE_LEFT, xmax = ZONE_RIGHT, ymin = ZONE_BOTTOM, ymax = ZONE_TOP)
     
     df_known <- df_i %>% dplyr::filter(!is.na(Result))
@@ -9920,7 +10891,7 @@ server <- function(input, output, session) {
         },
         CompPercent   = {
           comp <- (PlateLocSide >= -1.5 & PlateLocSide <= 1.5 &
-                     PlateLocHeight >= (2.65-1.5) & PlateLocHeight <= (2.65+1.5))
+                     PlateLocHeight >= (2.65-1.7) & PlateLocHeight <= (2.65+1.3))
           safe_pct(sum(comp, na.rm = TRUE), sum(!is.na(comp)))
         },
         
@@ -9970,7 +10941,7 @@ server <- function(input, output, session) {
             PlateLocHeight >= ZONE_BOTTOM & PlateLocHeight <= ZONE_TOP, 1.47,
           ifelse(
             PlateLocSide >= -1.5 & PlateLocSide <= 1.5 &
-              PlateLocHeight >= (2.65-1.5) & PlateLocHeight <= (2.65+1.5),
+              PlateLocHeight >= (2.65-1.7) & PlateLocHeight <= (2.65+1.3),
             0.73, 0
           )
         )) * 100, 1),
@@ -10137,7 +11108,7 @@ server <- function(input, output, session) {
           df$PlateLocHeight >= ZONE_BOTTOM & df$PlateLocHeight <= ZONE_TOP, 1.47,
         ifelse(
           df$PlateLocSide >= -1.5 & df$PlateLocSide <= 1.5 &
-            df$PlateLocHeight >= (2.65 - 1.5) & df$PlateLocHeight <= (2.65 + 1.5),
+            df$PlateLocHeight >= (2.65 - 1.7) & df$PlateLocHeight <= (2.65 + 1.3),
           0.73, 0
         )
       )
@@ -10310,13 +11281,23 @@ server <- function(input, output, session) {
       
       df_dt <- if (exists("collapse_list_cols")) collapse_list_cols(df_out) else df_out
       df_dt <- as.data.frame(df_dt, stringsAsFactors = FALSE)
-      
+      df_disp <- df_dt
+      if ("#" %in% names(df_disp)) {
+        df_disp$`#` <- wrap_pitch_counts(df_disp$`#`)
+      }
+
+      summary_table_page_cache(list(
+        table = df_disp,
+        source = df,
+        label_column = "Pitch"
+      ))
+
       visible_set <- visible_set_for(mode, custom)
       return(datatable_with_colvis(
-        df_dt,
+        df_disp,
         lock            = "Pitch",
         remember        = FALSE,
-        default_visible = intersect(visible_set, names(df_dt))
+        default_visible = intersect(visible_set, names(df_disp))
       ))
     }
     
@@ -10355,7 +11336,7 @@ server <- function(input, output, session) {
             df$PlateLocHeight >= ZONE_BOTTOM & df$PlateLocHeight <= ZONE_TOP, 1.47,
           ifelse(
             df$PlateLocSide >= -1.5 & df$PlateLocSide <= 1.5 &
-              df$PlateLocHeight >= (2.65-1.5) & df$PlateLocHeight <= (2.65+1.5),
+              df$PlateLocHeight >= (2.65-1.7) & df$PlateLocHeight <= (2.65+1.3),
             0.73, 0
           )
         )
@@ -10410,7 +11391,7 @@ server <- function(input, output, session) {
                                          df$PlateLocHeight >= ZONE_BOTTOM & df$PlateLocHeight <= ZONE_TOP)
           ifelse(sum(!is.na(inzone))>0, paste0(round(100*sum(inzone, na.rm=TRUE)/sum(!is.na(inzone)),1), "%"), "") },
           CompPercent   = { comp <- (df$PlateLocSide >= -1.5 & df$PlateLocSide <= 1.5 &
-                                       df$PlateLocHeight >= (2.65-1.5) & df$PlateLocHeight <= (2.65+1.5))
+                                       df$PlateLocHeight >= (2.65-1.7) & df$PlateLocHeight <= (2.65+1.3))
           ifelse(sum(!is.na(comp))>0, paste0(round(100*sum(comp, na.rm=TRUE)/sum(!is.na(comp)),1), "%"), "") },
           KPercent      = ifelse(bf_live>0, paste0(round(100*k_live/bf_live,1), "%"), ""),
           BBPercent     = ifelse(bf_live>0, paste0(round(100*bb_live/bf_live,1), "%"), ""),
@@ -10478,13 +11459,23 @@ server <- function(input, output, session) {
     
     df_table <- enforce_process_order(df_table)
     df_table <- enforce_stuff_order(df_table)
-    
+    df_disp <- df_table
+    if ("#" %in% names(df_disp)) {
+      df_disp$`#` <- wrap_pitch_counts(df_disp$`#`)
+    }
+
+    summary_table_page_cache(list(
+      table = df_disp,
+      source = df,
+      label_column = "Pitch"
+    ))
+
     visible_set <- visible_set_for(mode, custom)
     datatable_with_colvis(
-      df_table,
+      df_disp,
       lock            = "Pitch",
       remember        = FALSE,
-      default_visible = intersect(visible_set, names(df_table))
+      default_visible = intersect(visible_set, names(df_disp))
     )
   })
   
@@ -10594,7 +11585,7 @@ server <- function(input, output, session) {
           df$PlateLocHeight >= ZONE_BOTTOM & df$PlateLocHeight <= ZONE_TOP, 1.47,
         ifelse(
           df$PlateLocSide >= -1.5 & df$PlateLocSide <= 1.5 &
-            df$PlateLocHeight >= (2.65 - 1.5) & df$PlateLocHeight <= (2.65 + 1.5),
+            df$PlateLocHeight >= (2.65 - 1.7) & df$PlateLocHeight <= (2.65 + 1.3),
           0.73, 0
         )
       )
@@ -10771,13 +11762,23 @@ server <- function(input, output, session) {
         z[is_all & (is.na(z) | trimws(z) == "")] <- "0.0%"
         df_dt[[nm]] <- z
       }
-      
+      df_disp <- df_dt
+      if ("#" %in% names(df_disp)) {
+        df_disp$`#` <- wrap_pitch_counts(df_disp$`#`)
+      }
+
+      summary_table_cache(list(
+        table = df_disp,
+        source = df,
+        label_column = "Pitch"
+      ))
+
       visible_set <- visible_set_for(mode, custom)
       return(datatable_with_colvis(
-        df_dt,
+        df_disp,
         lock            = "Pitch",
         remember        = FALSE,
-        default_visible = intersect(visible_set, names(df_dt))
+        default_visible = intersect(visible_set, names(df_disp))
       ))
     }
     
@@ -10813,7 +11814,7 @@ server <- function(input, output, session) {
             df$PlateLocHeight >= ZONE_BOTTOM & df$PlateLocHeight <= ZONE_TOP, 1.47,
           ifelse(
             df$PlateLocSide >= -1.5 & df$PlateLocSide <= 1.5 &
-              df$PlateLocHeight >= (2.65-1.5) & df$PlateLocHeight <= (2.65+1.5),
+              df$PlateLocHeight >= (2.65-1.7) & df$PlateLocHeight <= (2.65+1.3),
             0.73, 0
           )
         )
@@ -10868,7 +11869,7 @@ server <- function(input, output, session) {
                                          df$PlateLocHeight >= ZONE_BOTTOM & df$PlateLocHeight <= ZONE_TOP)
           ifelse(sum(!is.na(inzone))>0, paste0(round(100*sum(inzone, na.rm=TRUE)/sum(!is.na(inzone)),1), "%"), "") },
           CompPercent   = { comp <- (df$PlateLocSide >= -1.5 & df$PlateLocSide <= 1.5 &
-                                       df$PlateLocHeight >= (2.65-1.5) & df$PlateLocHeight <= (2.65+1.5))
+                                       df$PlateLocHeight >= (2.65-1.7) & df$PlateLocHeight <= (2.65+1.3))
           ifelse(sum(!is.na(comp))>0, paste0(round(100*sum(comp, na.rm=TRUE)/sum(!is.na(comp)),1), "%"), "") },
           KPercent      = ifelse(bf_live>0, paste0(round(100*k_live/bf_live,1), "%"), ""),
           BBPercent     = ifelse(bf_live>0, paste0(round(100*bb_live/bf_live,1), "%"), ""),
@@ -10936,15 +11937,33 @@ server <- function(input, output, session) {
     
     df_table <- enforce_process_order(df_table)
     df_table <- enforce_stuff_order(df_table)
-    
+    df_disp <- df_table
+    if ("#" %in% names(df_disp)) {
+      df_disp$`#` <- wrap_pitch_counts(df_disp$`#`)
+    }
+
+    summary_table_cache(list(
+      table = df_disp,
+      source = df,
+      label_column = "Pitch"
+    ))
+
     visible_set <- visible_set_for(mode, custom)
     datatable_with_colvis(
-      df_table,
+      df_disp,
       lock            = "Pitch",
       remember        = FALSE,
-      default_visible = intersect(visible_set, names(df_table))
+      default_visible = intersect(visible_set, names(df_disp))
     )
   })
+
+  observeEvent(input$summaryTablePage_cell_clicked, {
+    handle_pitch_table_click(input$summaryTablePage_cell_clicked, summary_table_page_cache, table_label = "Summary")
+  }, ignoreNULL = TRUE)
+
+  observeEvent(input$summaryTable_cell_clicked, {
+    handle_pitch_table_click(input$summaryTable_cell_clicked, summary_table_cache, table_label = "Data & Performance")
+  }, ignoreNULL = TRUE)
   
   # ================================
   # Pitching → AB Report (no tables)
@@ -10995,7 +12014,7 @@ server <- function(input, output, session) {
   .abp_geom_zone <- function() {
     home <- data.frame(x=c(-0.75,0.75,0.75,0.00,-0.75),
                        y=c(1.05, 1.05,1.15,1.25, 1.15)-0.5)
-    cz <- data.frame(xmin = -1.5, xmax = 1.5, ymin = 2.65 - 1.5, ymax = 2.65 + 1.5)
+    cz <- data.frame(xmin = -1.5, xmax = 1.5, ymin = 2.65 - 1.7, ymax = 2.65 + 1.3)
     sz <- data.frame(xmin = ZONE_LEFT, xmax = ZONE_RIGHT, ymin = ZONE_BOTTOM, ymax = ZONE_TOP)
     list(
       geom_polygon(data = home, aes(x, y), fill = NA, color = "black"),
@@ -11449,21 +12468,141 @@ server <- function(input, output, session) {
   }
   HB_CANDIDATES  <- c("HB","HorzBreak","HorizBreak","HorizontalBreak","HBreak","HB_in","HB_inches")
   IVB_CANDIDATES <- c("IVB","InducedVertBreak","IVB_in","IVB_inches")
+
+  velocity_points_df <- reactive({
+    df <- filtered_data()
+    if (!nrow(df)) return(df[0, , drop = FALSE])
+    df2 <- df %>%
+      dplyr::mutate(.orig_order = dplyr::row_number())
+    if ("Date" %in% names(df2)) {
+      df2 <- df2 %>% dplyr::arrange(Date, .orig_order)
+    } else {
+      df2 <- df2 %>% dplyr::arrange(.orig_order)
+    }
+    df2 <- df2 %>%
+      dplyr::mutate(
+        PitchCount = dplyr::row_number(),
+        tt = make_hover_tt(.),
+        rid = dplyr::row_number()
+      )
+    df2 <- as.data.frame(df2, stringsAsFactors = FALSE)
+    rownames(df2) <- as.character(df2$rid)
+    df2
+  })
+
+  velocity_by_game_data <- reactive({
+    df <- filtered_data()
+    if (!nrow(df)) {
+      empty <- data.frame(Date = as.Date(character()), TaggedPitchType = character(), SessionType = character(), stringsAsFactors = FALSE)
+      return(list(summary = empty, raw = df[0, , drop = FALSE]))
+    }
+
+    ivb_nm <- .pick_col(df, IVB_CANDIDATES)
+    hb_nm  <- .pick_col(df, HB_CANDIDATES)
+
+    dfG <- df %>%
+      dplyr::filter(!is.na(RelSpeed), !is.na(TaggedPitchType), !is.na(Date)) %>%
+      dplyr::mutate(
+        IVB_ = if (!is.na(ivb_nm)) .data[[ivb_nm]] else NA_real_,
+        HB_  = if (!is.na(hb_nm))  .data[[hb_nm]]  else NA_real_
+      ) %>%
+      dplyr::group_by(Date, TaggedPitchType, SessionType) %>%
+      dplyr::summarise(
+        Velo = .safe_mean(RelSpeed),
+        IVB  = .safe_mean(IVB_),
+        HB   = .safe_mean(HB_),
+        n    = dplyr::n(),
+        .groups = "drop"
+      ) %>%
+      dplyr::arrange(Date, TaggedPitchType) %>%
+      dplyr::mutate(
+        tt  = paste0(
+          "Session: ", dplyr::coalesce(as.character(SessionType), "Unknown"), "\n",
+          TaggedPitchType, "\n",
+          "Velo: ", sprintf("%.1f", Velo), " mph\n",
+          "IVB: ",  ifelse(is.finite(IVB), sprintf("%.1f", IVB), "—"), "\n",
+          "HB: ",   ifelse(is.finite(HB),  sprintf("%.1f", HB),  "—"), "\n",
+          "Pitches: ", n
+        ),
+        rid = paste0(format(as.Date(Date), "%Y-%m-%d"), "::", TaggedPitchType, "::", dplyr::coalesce(as.character(SessionType), ""))
+      )
+
+    dfG <- as.data.frame(dfG, stringsAsFactors = FALSE)
+    list(summary = dfG, raw = df)
+  })
+
+  velocity_inning_data <- reactive({
+    df <- filtered_data();
+    if (!nrow(df)) {
+      empty <- data.frame(TaggedPitchType = character(), InningOrd = integer(), stringsAsFactors = FALSE)
+      return(list(summary = empty, detail = df[0, , drop = FALSE]))
+    }
+    if (!("SessionType" %in% names(df)) || !"Inning" %in% names(df)) {
+      empty <- data.frame(TaggedPitchType = character(), InningOrd = integer(), stringsAsFactors = FALSE)
+      return(list(summary = empty, detail = df[0, , drop = FALSE]))
+    }
+
+    df_live <- df %>% dplyr::filter(SessionType == "Live", !is.na(RelSpeed), !is.na(Inning))
+    if (!nrow(df_live)) {
+      empty <- data.frame(TaggedPitchType = character(), InningOrd = integer(), stringsAsFactors = FALSE)
+      return(list(summary = empty, detail = df_live))
+    }
+
+    ivb_nm <- .pick_col(df_live, IVB_CANDIDATES)
+    hb_nm  <- .pick_col(df_live, HB_CANDIDATES)
+
+    df_live <- df_live %>%
+      dplyr::mutate(
+        GameKey = dplyr::case_when(
+          "GameID" %in% names(df_live) ~ as.character(.data[["GameID"]]),
+          TRUE                         ~ format(as.Date(Date), "%Y-%m-%d")
+        ),
+        .orig_order = dplyr::row_number()
+      ) %>%
+      dplyr::arrange(GameKey, .orig_order) %>%
+      dplyr::group_by(GameKey) %>%
+      dplyr::mutate(InningOrd = match(Inning, unique(Inning))) %>%
+      dplyr::ungroup()
+
+    dfI <- df_live %>%
+      dplyr::mutate(
+        IVB_ = if (!is.na(ivb_nm)) .data[[ivb_nm]] else NA_real_,
+        HB_  = if (!is.na(hb_nm))  .data[[hb_nm]]  else NA_real_
+      ) %>%
+      dplyr::group_by(InningOrd, TaggedPitchType) %>%
+      dplyr::summarise(
+        Velo  = .safe_mean(RelSpeed),
+        IVB   = .safe_mean(IVB_),
+        HB    = .safe_mean(HB_),
+        n     = dplyr::n(),
+        games = dplyr::n_distinct(GameKey),
+        .groups = "drop"
+      ) %>%
+      dplyr::arrange(InningOrd, TaggedPitchType) %>%
+      dplyr::mutate(
+        tt = paste0(
+          "Session: Live\n",
+          "Inning #: ", InningOrd, "\n",
+          TaggedPitchType, "\n",
+          "Velo: ", sprintf("%.1f", Velo), " mph\n",
+          "IVB: ",  ifelse(is.finite(IVB), sprintf("%.1f", IVB), "—"), "\n",
+          "HB: ",   ifelse(is.finite(HB),  sprintf("%.1f", HB),  "—"), "\n",
+          "Games: ", games, " | Pitches: ", n
+        ),
+        rid = paste0(TaggedPitchType, "::", InningOrd)
+      )
+
+    list(summary = as.data.frame(dfI, stringsAsFactors = FALSE), detail = as.data.frame(df_live, stringsAsFactors = FALSE))
+  })
   
   
   # ----------------------------
   # 1) CURRENT VELO PLOT (+ inning vlines for Live)
   # ----------------------------
   output$velocityPlot <- ggiraph::renderGirafe({
-    df <- filtered_data(); if (!nrow(df)) return(NULL)
+    df2 <- velocity_points_df(); if (!nrow(df2)) return(NULL)
     types <- ordered_types(); types_chr <- as.character(types)
-    
-    df2 <- df %>% dplyr::arrange(Date, dplyr::row_number()) %>% dplyr::mutate(
-      PitchCount = dplyr::row_number(),
-      tt  = make_hover_tt(.),
-      rid = dplyr::row_number()
-    )
-    
+
     sp <- df2$RelSpeed
     if (all(is.na(sp))) {
       y_min <- 0; y_max <- 100
@@ -11521,7 +12660,8 @@ server <- function(input, output, session) {
       options = list(
         ggiraph::opts_tooltip(use_fill = TRUE, css = tooltip_css),
         ggiraph::opts_hover(css = "stroke:black;stroke-width:1.5px;"),
-        ggiraph::opts_hover_inv(css = "opacity:0.15;")
+        ggiraph::opts_hover_inv(css = "opacity:0.15;"),
+        ggiraph::opts_selection(type = "single", only_shiny = TRUE)
       )
     )
   })
@@ -11535,50 +12675,21 @@ server <- function(input, output, session) {
   # Velocity by Game (Date) & Pitch Type  — updated tooltip + x-axis
   # ----------------------------
   output$velocityByGamePlot <- ggiraph::renderGirafe({
-    df <- filtered_data(); if (!nrow(df)) return(NULL)
-    types <- ordered_types(); types_chr <- as.character(types)
-    
-    ivb_nm <- .pick_col(df, IVB_CANDIDATES)
-    hb_nm  <- .pick_col(df, HB_CANDIDATES)
-    
-    dfG <- df %>%
-      dplyr::filter(!is.na(RelSpeed), !is.na(TaggedPitchType), !is.na(Date)) %>%
-      dplyr::mutate(
-        IVB_ = if (!is.na(ivb_nm)) .data[[ivb_nm]] else NA_real_,
-        HB_  = if (!is.na(hb_nm))  .data[[hb_nm]]  else NA_real_
-      ) %>%
-      dplyr::group_by(Date, TaggedPitchType, SessionType) %>%
-      dplyr::summarise(
-        Velo = .safe_mean(RelSpeed),
-        IVB  = .safe_mean(IVB_),
-        HB   = .safe_mean(HB_),
-        n    = dplyr::n(),
-        .groups = "drop"
-      ) %>%
-      dplyr::arrange(Date, TaggedPitchType) %>%
-      dplyr::mutate(
-        tt  = paste0(
-          "Session: ", dplyr::coalesce(as.character(SessionType), "Unknown"), "\n",
-          TaggedPitchType, "\n",
-          "Velo: ", sprintf("%.1f", Velo), " mph\n",
-          "IVB: ",  ifelse(is.finite(IVB), sprintf("%.1f", IVB), "—"), "\n",
-          "HB: ",   ifelse(is.finite(HB),  sprintf("%.1f", HB),  "—"), "\n",
-          "Pitches: ", n
-        ),
-        rid = paste0(format(Date, "%Y-%m-%d"), "_", TaggedPitchType, "_", dplyr::coalesce(as.character(SessionType), "U"))
-      )
-    
+    data_pkg <- velocity_by_game_data()
+    dfG <- data_pkg$summary
     if (!nrow(dfG)) return(NULL)
-    
-    sp <- df$RelSpeed
+    df_raw <- data_pkg$raw
+    types <- ordered_types(); types_chr <- as.character(types)
+
+    sp <- df_raw$RelSpeed
     if (all(is.na(sp))) { y_min <- 0; y_max <- 100 } else {
       y_min <- floor(min(sp, na.rm = TRUE) / 5) * 5
       y_max <- ceiling(max(sp, na.rm = TRUE) / 5) * 5
       if (y_min == y_max) y_max <- y_min + 5
     }
-    
-    date_breaks <- sort(unique(dfG$Date))
-    
+
+    date_breaks <- sort(unique(as.Date(dfG$Date)))
+
     p2 <- ggplot(dfG, aes(Date, Velo, group = TaggedPitchType, color = TaggedPitchType)) +
       ggiraph::geom_line_interactive(linewidth = 0.7, alpha = 0.85) +
       ggiraph::geom_point_interactive(
@@ -11597,13 +12708,14 @@ server <- function(input, output, session) {
       ) +
       labs(title = "Average Velocity by Game",
            x = "", y = "Velocity (MPH)")
-    
+
     ggiraph::girafe(
       ggobj = p2,
       options = list(
         ggiraph::opts_tooltip(use_fill = TRUE, css = tooltip_css),
         ggiraph::opts_hover(css = "stroke:black;stroke-width:1.5px;"),
-        ggiraph::opts_hover_inv(css = "opacity:0.15;")
+        ggiraph::opts_hover_inv(css = "opacity:0.15;"),
+        ggiraph::opts_selection(type = "single", only_shiny = TRUE)
       )
     )
   })
@@ -11618,65 +12730,19 @@ server <- function(input, output, session) {
   # Inning-to-Inning Average Velocity — updated tooltip (Session only) + HB fix
   # ----------------------------
   output$velocityInningPlot <- ggiraph::renderGirafe({
-    df <- filtered_data(); if (!nrow(df)) return(NULL)
-    types <- ordered_types(); types_chr <- as.character(types)
-    if (!("SessionType" %in% names(df)) || !"Inning" %in% names(df)) return(NULL)
-    
-    df_live <- df %>% dplyr::filter(SessionType == "Live", !is.na(RelSpeed), !is.na(Inning))
-    if (!nrow(df_live)) return(NULL)
-    
-    ivb_nm <- .pick_col(df_live, IVB_CANDIDATES)
-    hb_nm  <- .pick_col(df_live, HB_CANDIDATES)
-    
-    df_live <- df_live %>%
-      dplyr::mutate(
-        GameKey = dplyr::case_when(
-          "GameID" %in% names(df_live) ~ as.character(.data[["GameID"]]),
-          TRUE                         ~ format(as.Date(Date), "%Y-%m-%d")
-        )
-      ) %>%
-      dplyr::arrange(GameKey, dplyr::row_number()) %>%
-      dplyr::group_by(GameKey) %>%
-      dplyr::mutate(InningOrd = match(Inning, unique(Inning))) %>%
-      dplyr::ungroup()
-    
-    dfI <- df_live %>%
-      dplyr::mutate(
-        IVB_ = if (!is.na(ivb_nm)) .data[[ivb_nm]] else NA_real_,
-        HB_  = if (!is.na(hb_nm))  .data[[hb_nm]]  else NA_real_
-      ) %>%
-      dplyr::group_by(InningOrd, TaggedPitchType) %>%
-      dplyr::summarise(
-        Velo  = .safe_mean(RelSpeed),
-        IVB   = .safe_mean(IVB_),
-        HB    = .safe_mean(HB_),
-        n     = dplyr::n(),
-        games = dplyr::n_distinct(GameKey),
-        .groups = "drop"
-      ) %>%
-      dplyr::arrange(InningOrd, TaggedPitchType) %>%
-      dplyr::mutate(
-        tt = paste0(
-          "Session: Live\n",
-          "Inning #: ", InningOrd, "\n",
-          TaggedPitchType, "\n",
-          "Velo: ", sprintf("%.1f", Velo), " mph\n",
-          "IVB: ",  ifelse(is.finite(IVB), sprintf("%.1f", IVB), "—"), "\n",
-          "HB: ",   ifelse(is.finite(HB),  sprintf("%.1f", HB),  "—"), "\n",
-          "Games: ", games, " | Pitches: ", n
-        ),
-        rid = paste0(TaggedPitchType, "_", InningOrd)
-      )
-    
+    data_pkg <- velocity_inning_data()
+    dfI <- data_pkg$summary
     if (!nrow(dfI)) return(NULL)
-    
+    df_live <- data_pkg$detail
+    types <- ordered_types(); types_chr <- as.character(types)
+
     sp <- df_live$RelSpeed
     if (all(is.na(sp))) { y_min <- 0; y_max <- 100 } else {
       y_min <- floor(min(sp, na.rm = TRUE) / 5) * 5
       y_max <- ceiling(max(sp, na.rm = TRUE) / 5) * 5
       if (y_min == y_max) y_max <- y_min + 5
     }
-    
+
     xmax <- max(dfI$InningOrd, na.rm = TRUE)
     p3 <- ggplot(dfI, aes(InningOrd, Velo, group = TaggedPitchType, color = TaggedPitchType)) +
       ggiraph::geom_line_interactive(linewidth = 0.7, alpha = 0.85) +
@@ -11692,17 +12758,115 @@ server <- function(input, output, session) {
       theme(legend.position = "bottom", legend.text = element_text(size = 14)) +
       labs(title = "Average Velocity by Inning ",
            x = "Inning of Appearance", y = "Velocity (MPH)")
-    
+
     ggiraph::girafe(
       ggobj = p3,
       options = list(
         ggiraph::opts_tooltip(use_fill = TRUE, css = tooltip_css),
         ggiraph::opts_hover(css = "stroke:black;stroke-width:1.5px;"),
-        ggiraph::opts_hover_inv(css = "opacity:0.15;")
+        ggiraph::opts_hover_inv(css = "opacity:0.15;"),
+        ggiraph::opts_selection(type = "single", only_shiny = TRUE)
       )
     )
   })
-  
+
+  observeEvent(input$velocityPlot_selected, {
+    sel <- safe_selected(input$velocityPlot_selected)
+    df2 <- velocity_points_df()
+    if (!nrow(df2)) return()
+    if (!is.finite(sel)) return()
+    idx <- max(1L, min(nrow(df2), sel))
+    show_pitch_video_modal_multi(df2[idx, , drop = FALSE], dataset = df2, dataset_idx = idx)
+  }, ignoreNULL = TRUE)
+
+  observeEvent(input$velocityByGamePlot_selected, {
+    sel <- input$velocityByGamePlot_selected
+    if (is.null(sel) || !length(sel)) return()
+    summary_df <- velocity_by_game_data()$summary
+    if (!nrow(summary_df)) return()
+    row <- summary_df[summary_df$rid %in% sel, , drop = FALSE]
+    if (!nrow(row)) return()
+
+    target_date <- suppressWarnings(as.Date(row$Date[1]))
+    pitch_type  <- row$TaggedPitchType[1]
+    session_val <- row$SessionType[1]
+
+    df <- filtered_data(); if (!nrow(df)) return()
+    rows <- as.data.frame(df, stringsAsFactors = FALSE)
+
+    if (!is.na(target_date)) {
+      rows_date <- NULL
+      if ("Date" %in% names(rows)) {
+        rows_date <- rows[as.Date(rows$Date) == target_date, , drop = FALSE]
+      } else if ("GameDate" %in% names(rows)) {
+        rows_date <- rows[as.Date(rows$GameDate) == target_date, , drop = FALSE]
+      } else if ("datetime" %in% names(rows)) {
+        rows_date <- rows[as.Date(rows$datetime) == target_date, , drop = FALSE]
+      }
+      if (!is.null(rows_date) && nrow(rows_date)) rows <- rows_date
+    }
+    if (!is.character(pitch_type) || !nzchar(pitch_type)) return()
+    rows <- rows[rows$TaggedPitchType == pitch_type, , drop = FALSE]
+    if (is.null(rows) || !nrow(rows)) {
+      showModal(modalDialog("No pitches found for that selection.", easyClose = TRUE, footer = NULL))
+      return()
+    }
+    if (!is.null(session_val) && nzchar(session_val) && "SessionType" %in% names(rows)) {
+      rows_session <- rows[rows$SessionType == session_val, , drop = FALSE]
+      if (nrow(rows_session)) rows <- rows_session
+    }
+
+    rows <- rows %>%
+      dplyr::mutate(.seq = dplyr::row_number())
+    if ("Date" %in% names(rows)) rows <- rows %>% dplyr::arrange(Date, .seq)
+    else rows <- rows %>% dplyr::arrange(.seq)
+    rows <- as.data.frame(rows, stringsAsFactors = FALSE)
+    if (!nrow(rows)) {
+      showModal(modalDialog("No pitches found for that selection.", easyClose = TRUE, footer = NULL))
+      return()
+    }
+    rownames(rows) <- as.character(seq_len(nrow(rows)))
+    label_txt <- paste0(pitch_type, if (!is.na(target_date)) paste0(" — ", format(target_date, "%m/%d/%y")) else "")
+    show_pitch_video_sequence(rows,
+                              label = label_txt,
+                              start_index = 1L,
+                              compare_pool = rows,
+                              primary_pool_idx = 1L)
+  }, ignoreNULL = TRUE)
+
+  observeEvent(input$velocityInningPlot_selected, {
+    sel <- input$velocityInningPlot_selected
+    if (is.null(sel) || !length(sel)) return()
+    data_pkg <- velocity_inning_data()
+    summary_df <- data_pkg$summary
+    if (!nrow(summary_df)) return()
+    row <- summary_df[summary_df$rid %in% sel, , drop = FALSE]
+    if (!nrow(row)) return()
+
+    pitch_type <- row$TaggedPitchType[1]
+    inning_ord <- suppressWarnings(as.integer(row$InningOrd[1]))
+    detail_df  <- data_pkg$detail
+    if (is.null(detail_df) || !nrow(detail_df)) return()
+
+    if (!is.character(pitch_type) || !nzchar(pitch_type)) return()
+    rows <- detail_df[detail_df$TaggedPitchType == pitch_type & detail_df$InningOrd == inning_ord, , drop = FALSE]
+    if (is.null(rows) || !nrow(rows)) {
+      showModal(modalDialog("No pitches found for that selection.", easyClose = TRUE, footer = NULL))
+      return()
+    }
+    rows <- rows %>%
+      dplyr::mutate(.seq = .orig_order %||% dplyr::row_number()) %>%
+      dplyr::arrange(GameKey, .seq)
+    rows <- as.data.frame(rows, stringsAsFactors = FALSE)
+    rownames(rows) <- as.character(seq_len(nrow(rows)))
+    label_txt <- paste0(pitch_type, " — Inning ", if (is.finite(inning_ord)) inning_ord else "")
+    show_pitch_video_sequence(rows,
+                              label = label_txt,
+                              start_index = 1L,
+                              compare_pool = rows,
+                              primary_pool_idx = 1L)
+  }, ignoreNULL = TRUE)
+
   
   # Velocity Trend Plot
   # Replace your existing output$veloTrendPlot with this:
@@ -11790,7 +12954,7 @@ server <- function(input, output, session) {
     
     home <- data.frame(x = c(-0.75, 0.75, 0.75, 0.00, -0.75),
                        y = c(1.05, 1.05, 1.15, 1.25, 1.15) - 0.5)
-    cz <- data.frame(xmin = -1.5, xmax = 1.5, ymin = 2.65 - 1.5, ymax = 2.65 + 1.5)
+    cz <- data.frame(xmin = -1.5, xmax = 1.5, ymin = 2.65 - 1.7, ymax = 2.65 + 1.3)
     sz <- data.frame(xmin = ZONE_LEFT, xmax = ZONE_RIGHT, ymin = ZONE_BOTTOM, ymax = ZONE_TOP)
     
     df_known <- dplyr::filter(df_i, !is.na(Result))
@@ -12036,7 +13200,7 @@ server <- function(input, output, session) {
     
     home <- data.frame(x=c(-0.75,0.75,0.75,0.00,-0.75),
                        y=c(1.05,1.05,1.15,1.25,1.15)-0.5)
-    cz <- data.frame(xmin = -1.5, xmax = 1.5, ymin = 2.65 - 1.5, ymax = 2.65 + 1.5)
+    cz <- data.frame(xmin = -1.5, xmax = 1.5, ymin = 2.65 - 1.7, ymax = 2.65 + 1.3)
     sz <- data.frame(xmin = ZONE_LEFT, xmax = ZONE_RIGHT, ymin = ZONE_BOTTOM, ymax = ZONE_TOP)
     
     p <- ggplot() +
@@ -12158,7 +13322,7 @@ server <- function(input, output, session) {
     trend_plot(
       df,
       PlateLocSide >= -1.5 & PlateLocSide <= 1.5 &
-        PlateLocHeight >= (2.65 - 1.5) & PlateLocHeight <= (2.65 + 1.5),
+        PlateLocHeight >= (2.65 - 1.7) & PlateLocHeight <= (2.65 + 1.3),
       "Comp %", "Percentage",
       function(x) mean(x, na.rm = TRUE) * 100
     )
@@ -12198,7 +13362,7 @@ server <- function(input, output, session) {
                           PlateLocHeight >= ZONE_BOTTOM & PlateLocHeight <= ZONE_TOP, 1.47,
                         ifelse(
                           PlateLocSide >= -1.5 & PlateLocSide <= 1.5 &
-                            PlateLocHeight >= (2.65 - 1.5) & PlateLocHeight <= (2.65 + 1.5),
+                            PlateLocHeight >= (2.65 - 1.7) & PlateLocHeight <= (2.65 + 1.3),
                           0.73, 0
                         )
                       ) * 100)
@@ -12227,7 +13391,7 @@ server <- function(input, output, session) {
             PlateLocHeight >= ZONE_BOTTOM & PlateLocHeight <= ZONE_TOP, 1.47,
           ifelse(
             PlateLocSide >= -1.5 & PlateLocSide <= 1.5 &
-              PlateLocHeight >= (2.65 - 1.5) & PlateLocHeight <= (2.65 + 1.5),
+              PlateLocHeight >= (2.65 - 1.7) & PlateLocHeight <= (2.65 + 1.3),
             0.73, 0
           )
         ) * 100
@@ -12251,7 +13415,7 @@ server <- function(input, output, session) {
                           PlateLocHeight >= ZONE_BOTTOM & PlateLocHeight <= ZONE_TOP, 1.47,
                         ifelse(
                           PlateLocSide >= -1.5 & PlateLocSide <= 1.5 &
-                            PlateLocHeight >= (2.65 - 1.5) & PlateLocHeight <= (2.65 + 1.5),
+                            PlateLocHeight >= (2.65 - 1.7) & PlateLocHeight <= (2.65 + 1.3),
                           0.73, 0
                         )
                       ) * 100)
@@ -12851,7 +14015,7 @@ server <- function(input, output, session) {
         1.47,  # Strike zone score
         ifelse(
           data$PlateLocSide >= -1.5 & data$PlateLocSide <= 1.5 &
-            data$PlateLocHeight >= (2.65 - 1.5) & data$PlateLocHeight <= (2.65 + 1.5),
+            data$PlateLocHeight >= (2.65 - 1.7) & data$PlateLocHeight <= (2.65 + 1.3),
           0.73,   # Competitive zone score
           0       # Outside competitive zone
         )
@@ -12916,7 +14080,7 @@ server <- function(input, output, session) {
         `Comp%` = as.numeric(ifelse(
           !is.na(PlateLocSide) & !is.na(PlateLocHeight) &
             PlateLocSide >= -1.5 & PlateLocSide <= 1.5 &
-            PlateLocHeight >= (2.65 - 1.5) & PlateLocHeight <= (2.65 + 1.5),
+            PlateLocHeight >= (2.65 - 1.7) & PlateLocHeight <= (2.65 + 1.3),
           100, 0
         )),
         `Strike%` = as.numeric(ifelse(
@@ -13701,7 +14865,7 @@ server <- function(input, output, session) {
                  dplyr::summarise(
                    total_located = sum(!is.na(PlateLocSide) & !is.na(PlateLocHeight), na.rm = TRUE),
                    in_zone = sum(PlateLocSide >= -0.83 & PlateLocSide <= 0.83 & 
-                                   PlateLocHeight >= 1.5 & PlateLocHeight <= 3.5, na.rm = TRUE),
+                                   PlateLocHeight >= 1.5 & PlateLocHeight <= 3.6, na.rm = TRUE),
                    value = ifelse(total_located > 0, round(100 * in_zone / total_located, 1), 0),
                    .groups = 'drop'
                  ) %>%
@@ -13713,7 +14877,7 @@ server <- function(input, output, session) {
                  dplyr::summarise(
                    total_located = sum(!is.na(PlateLocSide) & !is.na(PlateLocHeight), na.rm = TRUE),
                    competitive = sum(PlateLocSide >= -1.5 & PlateLocSide <= 1.5 &
-                                       PlateLocHeight >= (2.65-1.5) & PlateLocHeight <= (2.65+1.5), na.rm = TRUE),
+                                       PlateLocHeight >= (2.65-1.7) & PlateLocHeight <= (2.65+1.3), na.rm = TRUE),
                    value = ifelse(total_located > 0, round(100 * competitive / total_located, 1), 0),
                    .groups = 'drop'
                  ) %>%
@@ -13796,7 +14960,7 @@ server <- function(input, output, session) {
                        PlateLocHeight >= 1.5 & PlateLocHeight <= 3.6, 1.47,
                      ifelse(
                        PlateLocSide >= -1.5 & PlateLocSide <= 1.5 &
-                         PlateLocHeight >= (2.65-1.5) & PlateLocHeight <= (2.65+1.5), 0.73, 0
+                         PlateLocHeight >= (2.65-1.7) & PlateLocHeight <= (2.65+1.3), 0.73, 0
                      )
                    ), na.rm = TRUE),
                    value = round(ctrl_score * 100, 1),
