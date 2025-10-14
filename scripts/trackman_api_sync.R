@@ -346,7 +346,10 @@ main <- function() {
       video_type <- tok$type %||% ""
       blobs <- tryCatch(
         list_azure_blobs(entity_path, endpoint, sas_token),
-        error = function(e) { message(glue("   Failed to list blobs for entity {entity_path}: {e$message}")); tibble() }
+        error = function(e) {
+          message(glue("   Failed to list blobs for entity {entity_path}: {e$message}"))
+          tibble()
+        }
       )
       if (!nrow(blobs)) next
 
@@ -357,4 +360,56 @@ main <- function() {
 
         md <- meta_by_play %>% filter(playId == play_id) %>% slice_head(n = 1)
         camera_name <- md$cameraName %||% video_type %||% ""
-        camera_target <- md$cameraTarget %||
+        camera_target <- md$cameraTarget %||% ""
+
+        slot <- infer_camera_slot(camera_name, camera_target, video_type, blob$blob_name)
+        already <- video_map %>%
+          filter(
+            tolower(session_id) == tolower(session_id_local),
+            tolower(play_id) == play_id,
+            camera_slot == slot,
+            (azure_md5 == blob$content_md5) | (azure_blob == blob$blob_name)
+          )
+        if (nrow(already)) next
+
+        azure_url <- build_blob_url(entity_path, endpoint, blob$blob_name, sas_token)
+        public_id <- sanitize_public_id(folder, session_id_local, slot, substr(play_id, 1, 12))
+        message(glue("   Uploading play {play_id} [{slot}] ({camera_name})"))
+        upload <- tryCatch(
+          upload_cloudinary(azure_url, preset, cloud_name, public_id = public_id),
+          error = function(e) {
+            message(glue("     Upload failed: {e$message}"))
+            NULL
+          }
+        )
+        if (is.null(upload)) next
+
+        new_rows[[length(new_rows) + 1]] <- tibble(
+          session_id = session_id_local,
+          play_id = play_id,
+          camera_slot = slot,
+          camera_name = camera_name %||% "",
+          camera_target = camera_target %||% "",
+          video_type = video_type,
+          azure_blob = blob$blob_name,
+          azure_md5 = blob$content_md5 %||% "",
+          cloudinary_url = upload$secure_url %||% upload$url %||% "",
+          cloudinary_public_id = upload$public_id %||% public_id,
+          uploaded_at = now_iso()
+        )
+      }
+    }
+  }
+
+  if (length(new_rows)) {
+    additions <- bind_rows(new_rows)
+    video_map <- bind_rows(video_map, additions) %>% distinct()
+    dir.create(dirname(paths$video_map), recursive = TRUE, showWarnings = FALSE)
+    append_video_map(video_map, paths$video_map)
+    message(glue(">> Added {nrow(additions)} new video mapping rows."))
+  } else {
+    message(">> No new videos uploaded.")
+  }
+}
+
+main()
