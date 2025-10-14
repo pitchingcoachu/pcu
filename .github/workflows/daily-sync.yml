@@ -47,9 +47,9 @@ jobs:
 
     - name: Configure rsconnect
       env:
-        SHINYAPPS_ACCOUNT: jaredgaynor          # replace if different
-        SHINYAPPS_TOKEN:   ${{ secrets.SHINYAPPS_TOKEN }}
-        SHINYAPPS_SECRET:  ${{ secrets.SHINYAPPS_SECRET }}
+        SHINYAPPS_ACCOUNT: ${{ secrets.SHINYAPPS_ACCOUNT }}
+        SHINYAPPS_TOKEN: ${{ secrets.SHINYAPPS_TOKEN }}
+        SHINYAPPS_SECRET: ${{ secrets.SHINYAPPS_SECRET }}
       run: |
         Rscript -e "rsconnect::setAccountInfo(name='jaredgaynor', token='${{ secrets.SHINYAPPS_TOKEN }}', secret='${{ secrets.SHINYAPPS_SECRET }}')"
 
