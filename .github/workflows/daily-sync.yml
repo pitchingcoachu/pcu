@@ -1,0 +1,88 @@
+name: Daily GCU Data Sync and Deploy
+
+on:
+  schedule:
+    - cron: '0 14 * * *'   # 10:00 AM ET
+    - cron: '0 19 * * *'   # 3:00 PM ET
+  workflow_dispatch:  # Allow manual triggering
+
+jobs:
+  sync-and-deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Setup R
+      uses: r-lib/actions/setup-r@v2
+      with:
+        r-version: '4.4.0'
+        
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libcurl4-openssl-dev \
+          libssl-dev \
+          libxml2-dev \
+          libfontconfig1-dev \
+          libharfbuzz-dev \
+          libfribidi-dev \
+          libfreetype6-dev \
+          libpng-dev \
+          libjpeg-dev \
+          libtiff-dev \
+          libfontconfig1 \
+          libxcb1 \
+          libicu-dev \
+          libcairo2-dev \
+          libgdal-dev \
+          libgeos-dev \
+          libproj-dev \
+          libudunits2-dev
+
+        
+    - name: Install R packages
+      run: Rscript install_packages.R
+          
+    - name: Configure rsconnect
+      env:
+        SHINYAPPS_ACCOUNT: ${{ secrets.SHINYAPPS_ACCOUNT }}
+        SHINYAPPS_TOKEN: ${{ secrets.SHINYAPPS_TOKEN }}
+        SHINYAPPS_SECRET: ${{ secrets.SHINYAPPS_SECRET }}
+      run: |
+        Rscript -e "rsconnect::setAccountInfo(name='${{ secrets.SHINYAPPS_ACCOUNT }}', token='${{ secrets.SHINYAPPS_TOKEN }}', secret='${{ secrets.SHINYAPPS_SECRET }}')"
+        
+    - name: Sync PCU data
+      run: Rscript automated_data_sync.R
+        
+    - name: Check if data directory exists
+      id: check_data
+      run: |
+        if [ -d "data" ] && [ "$(ls -A data)" ]; then
+          echo "data_updated=true" >> $GITHUB_OUTPUT
+          echo "Found data files:"
+          ls -la data/
+        else
+          echo "data_updated=false" >> $GITHUB_OUTPUT
+          echo "No data directory or no files found"
+        fi
+        
+    - name: Deploy to shinyapps.io
+      if: steps.check_data.outputs.data_updated == 'true' || github.event_name == 'workflow_dispatch'
+      run: Rscript deploy_script.R
+      
+    - name: Commit updated data
+      if: steps.check_data.outputs.data_updated == 'true'
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add data/
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "Auto-update GCU data $(date)"
+          git pull --rebase origin main
+          git push
+        fi
