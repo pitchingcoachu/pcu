@@ -2090,10 +2090,18 @@ if (file.exists(video_map_path)) {
       pitch_data <- pitch_data %>%
         dplyr::mutate(.play_lower = tolower(as.character(PlayID))) %>%
         dplyr::left_join(vm_wide, by = c(".play_lower" = "play_id"), suffix = c("", ".vm")) %>%
+        { 
+          # Ensure the .vm columns exist even if pivot_wider didn’t create them
+          vm_cols <- paste0(c("VideoClip","VideoClip2","VideoClip3"), ".vm")
+          for (vm_col in vm_cols) {
+            if (!vm_col %in% names(.)) .[[vm_col]] <- NA_character_
+          }
+          .
+        } %>%
         dplyr::mutate(
-          VideoClip  = dplyr::coalesce(VideoClip.vm,  VideoClip),
-          VideoClip2 = dplyr::coalesce(VideoClip2.vm, VideoClip2),
-          VideoClip3 = dplyr::coalesce(VideoClip3.vm, VideoClip3)
+          VideoClip  = dplyr::coalesce(.data[["VideoClip.vm"]],  VideoClip),
+          VideoClip2 = dplyr::coalesce(.data[["VideoClip2.vm"]], VideoClip2),
+          VideoClip3 = dplyr::coalesce(.data[["VideoClip3.vm"]], VideoClip3)
         ) %>%
         dplyr::select(-dplyr::ends_with(".vm"), -.play_lower)
       matched_videos <- sum(nzchar(pitch_data$VideoClip %||% ""))
