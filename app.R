@@ -2,7 +2,12 @@
 # Shiny pitching report with per-player privacy + admin view + customized Stuff+ metric per pitch type
 
 library(shiny)
-library(tidyverse)
+library(dplyr)
+library(readr)
+library(tibble)
+library(stringr)
+library(lubridate)
+library(purrr)
 library(DT)
 library(gridExtra)
 library(ggplot2)
@@ -1831,7 +1836,7 @@ need_cols <- c(
   "InducedVertBreak","HorzBreak","RelSpeed","ReleaseTilt","BreakTilt",
   "SpinEfficiency","SpinRate","RelHeight","RelSide","Extension",
   "VertApprAngle","HorzApprAngle","PlateLocSide","PlateLocHeight",
-  "PitchCall","KorBB","Balls","Strikes","SessionType",
+  "PitchCall","KorBB","Balls","Strikes","SessionType","PlayID",
   "ExitSpeed","Angle","BatterSide",
   "PlayResult","TaggedHitType","OutsOnPlay",
   "Batter", "Catcher"   # ← add this
@@ -1885,6 +1890,53 @@ pitch_data <- pitch_data %>%
   ) %>%
   dplyr::filter(!is.na(TaggedPitchType) & tolower(TaggedPitchType) != "undefined") %>%
   force_pitch_levels()
+
+# ---- Attach Cloudinary video URLs when available ----
+video_map_path <- file.path(data_parent, "video_map.csv")
+if (!"VideoClip"  %in% names(pitch_data)) pitch_data$VideoClip  <- NA_character_
+if (!"VideoClip2" %in% names(pitch_data)) pitch_data$VideoClip2 <- NA_character_
+if (!"VideoClip3" %in% names(pitch_data)) pitch_data$VideoClip3 <- NA_character_
+
+if (file.exists(video_map_path)) {
+  vm_raw <- suppressMessages(readr::read_csv(video_map_path, show_col_types = FALSE))
+  if (nrow(vm_raw)) {
+    vm_wide <- vm_raw %>%
+      dplyr::mutate(
+        play_id = tolower(as.character(play_id)),
+        camera_slot = dplyr::case_when(
+          camera_slot %in% c("VideoClip","VideoClip2","VideoClip3") ~ camera_slot,
+          TRUE ~ NA_character_
+        ),
+        uploaded_at = suppressWarnings(lubridate::ymd_hms(uploaded_at, quiet = TRUE, tz = "UTC"))
+      ) %>%
+      dplyr::filter(
+        nzchar(play_id),
+        !is.na(camera_slot),
+        nzchar(cloudinary_url)
+      ) %>%
+      dplyr::arrange(play_id, camera_slot, dplyr::desc(uploaded_at)) %>%
+      dplyr::group_by(play_id, camera_slot) %>%
+      dplyr::slice_head(n = 1) %>%
+      dplyr::ungroup() %>%
+      tidyr::pivot_wider(
+        id_cols = play_id,
+        names_from = camera_slot,
+        values_from = cloudinary_url
+      )
+
+    if (nrow(vm_wide)) {
+      pitch_data <- pitch_data %>%
+        dplyr::mutate(.play_lower = tolower(as.character(PlayID))) %>%
+        dplyr::left_join(vm_wide, by = c(".play_lower" = "play_id"), suffix = c("", ".vm")) %>%
+        dplyr::mutate(
+          VideoClip  = dplyr::coalesce(VideoClip.vm,  VideoClip),
+          VideoClip2 = dplyr::coalesce(VideoClip2.vm, VideoClip2),
+          VideoClip3 = dplyr::coalesce(VideoClip3.vm, VideoClip3)
+        ) %>%
+        dplyr::select(-dplyr::ends_with(".vm"), -.play_lower)
+    }
+  }
+}
 
 # Friendly load message
 counts <- table(pitch_data$SessionType, useNA = "no")
