@@ -1837,7 +1837,11 @@ read_one <- function(fp) {
     HorzApprAngle    = c("HAA"),
     PlateLocSide     = c("PlateX"),
     PlateLocHeight   = c("PlateZ"),
-    PlayID           = c("PlayId", "PlayGuid", "PlayGuidId", "PlayGuidID")
+    PlayID           = c(
+      "PlayId", "PlayID", "PlayGuid", "PlayGuidId", "PlayGuidID",
+      "PitchUID", "PitchUid", "PitchGuid", "PitchGuidId", "PitchGuidID",
+      "PitchID", "PitchId", "PitchUuid", "PitchUUID"
+    )
   )
   
   nm <- names(df)
@@ -2092,6 +2096,10 @@ if (file.exists(video_map_path)) {
           VideoClip3 = dplyr::coalesce(VideoClip3.vm, VideoClip3)
         ) %>%
         dplyr::select(-dplyr::ends_with(".vm"), -.play_lower)
+      matched_videos <- sum(nzchar(pitch_data$VideoClip %||% ""))
+      message("Attached Cloudinary videos for ", matched_videos, " pitches via video_map.csv")
+    } else {
+      message("video_map.csv loaded but no playable rows matched PlayID in pitch data.")
     }
   }
 }
