@@ -63,6 +63,7 @@ jobs:
         TM_CLIENT_SECRET: 8dc67309-eef1-451a-886c-1c776380b666
         CLOUDINARY_CLOUD_NAME: pitchingcoachu
         CLOUDINARY_UPLOAD_PRESET: pcu_notes_unsigned
+        TM_LOOKBACK_DAYS: 30
         
 
     - name: Check if data directory exists
