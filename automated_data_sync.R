@@ -3,6 +3,7 @@
 # Syncs data from TrackMan FTP, starting at 2024-01-01
 
 library(RCurl)
+library(curl)
 library(readr)
 library(dplyr)
 library(lubridate)
@@ -30,10 +31,18 @@ dir.create(LOCAL_V3_DIR, recursive = TRUE, showWarnings = FALSE)
 # Helpers
 # ------------------------------------------------------------------
 
+ftp_credentials <- function() paste(FTP_USER, FTP_PASS, sep = ":")
+ftp_url <- function(path = "") paste0("ftp://", FTP_HOST, path)
+
 list_ftp_files <- function(ftp_path) {
-  url <- paste0("ftp://", FTP_USER, ":", FTP_PASS, "@", FTP_HOST, ftp_path)
+  url <- ftp_url(ftp_path)
   tryCatch({
-    files <- getURL(url, ftp.use.epsv = FALSE, dirlistonly = TRUE)
+    files <- getURL(
+      url,
+      ftp.use.epsv = FALSE,
+      dirlistonly = TRUE,
+      userpwd = ftp_credentials()
+    )
     out <- trimws(strsplit(files, "\n")[[1]])
     out[nzchar(out)]
   }, error = function(e) {
@@ -53,11 +62,11 @@ download_csv <- function(remote_file, local_file) {
     return(FALSE)
   }
 
-  url <- paste0("ftp://", FTP_USER, ":", FTP_PASS, "@", FTP_HOST, remote_file)
-
   tryCatch({
     tmp <- tempfile(fileext = ".csv")
-    download.file(url, tmp, method = "curl", quiet = TRUE)
+    handle <- curl::new_handle()
+    curl::handle_setopt(handle, userpwd = ftp_credentials(), ftp_use_epsv = FALSE)
+    curl::curl_download(ftp_url(remote_file), tmp, handle = handle, quiet = TRUE)
 
     data <- read_csv(tmp, show_col_types = FALSE)
     if (nrow(data) > 0) {
