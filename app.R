@@ -1618,19 +1618,176 @@ usage_by_type <- function(df) {
 library(readr)
 library(stringr)   # explicit, even though tidyverse includes it
 
-# Point to the app's local data folder (works locally & on shinyapps.io)
-data_parent <- normalizePath(file.path(getwd(), "data"), mustWork = TRUE)
+resolve_data_root <- function() {
+  as_paths <- function(x) {
+    x <- unique(trimws(c(x)))
+    x <- x[nzchar(x)]
+    if (!length(x)) return(character(0))
+    path.expand(x)
+  }
+  
+  candidate_dirs <- as_paths(c(
+    Sys.getenv("PCU_DATA_DIR", unset = ""),
+    Sys.getenv("DATA_DIR", unset = ""),
+    Sys.getenv("RSCONNECT_DATA_DIR", unset = ""),
+    getOption("PCU_DATA_DIR", NULL),
+    getOption("pcu.data_dir", NULL),
+    file.path(getwd(), "data")
+  ))
+  
+  checked_dirs <- character(0)
+  archive_candidates <- character(0)
+  ftp_attempted <- FALSE
+  ftp_success <- FALSE
+  ftp_error <- NULL
+  
+  dir_csvs <- function(dir) {
+    if (!dir.exists(dir)) return(character(0))
+    list.files(dir, pattern = "\\.csv$", recursive = TRUE, full.names = TRUE)
+  }
+  
+  for (dir in candidate_dirs) {
+    checked_dirs <- unique(c(checked_dirs, dir))
+    csvs <- dir_csvs(dir)
+    if (length(csvs)) {
+      message("Loading data from directory: ", dir)
+      return(list(
+        path      = normalizePath(dir),
+        csvs      = csvs,
+        checked   = checked_dirs,
+        archives  = archive_candidates,
+        ftp_attempted = ftp_attempted,
+        ftp_success   = ftp_success,
+        ftp_error     = ftp_error
+      ))
+    }
+  }
+  
+  dest_dir <- path.expand(file.path(getwd(), "data"))
+  dir.create(dest_dir, recursive = TRUE, showWarnings = FALSE)
+  checked_dirs <- unique(c(checked_dirs, dest_dir))
+  
+  archive_candidates <- as_paths(c(
+    Sys.getenv("PCU_DATA_ARCHIVE", unset = ""),
+    Sys.getenv("PCU_DATA_ARCHIVE_URL", unset = ""),
+    list.files(dest_dir, pattern = "\\.zip$", full.names = TRUE),
+    file.path(getwd(), "data_bundle.zip")
+  ))
+  
+  if (length(archive_candidates)) {
+    for (arch in archive_candidates) {
+      if (file.exists(arch)) {
+        message("Hydrating data from local archive: ", arch)
+        try(utils::unzip(arch, exdir = dest_dir, overwrite = TRUE), silent = TRUE)
+      } else if (grepl("^https?://", arch, ignore.case = TRUE)) {
+        message("Hydrating data from remote archive: ", arch)
+        tmp <- tempfile(fileext = ".zip")
+        ok <- tryCatch({
+          utils::download.file(arch, tmp, mode = "wb", quiet = TRUE)
+          TRUE
+        }, error = function(e) {
+          message("Failed to download archive: ", conditionMessage(e))
+          FALSE
+        })
+        if (ok && file.exists(tmp)) {
+          try(utils::unzip(tmp, exdir = dest_dir, overwrite = TRUE), silent = TRUE)
+        }
+        if (file.exists(tmp)) unlink(tmp)
+      }
+      csvs <- dir_csvs(dest_dir)
+      if (length(csvs)) {
+        message("Loaded data from hydrated archive into: ", dest_dir)
+        return(list(
+          path      = normalizePath(dest_dir),
+          csvs      = csvs,
+          checked   = checked_dirs,
+          archives  = archive_candidates,
+          ftp_attempted = ftp_attempted,
+          ftp_success   = ftp_success,
+          ftp_error     = ftp_error
+        ))
+      }
+    }
+  }
 
-# Find every CSV under data/, keep only those under practice/ or V3/
-all_csvs <- list.files(
-  path       = data_parent,
-  pattern    = "\\.csv$",
-  recursive  = TRUE,
-  full.names = TRUE
-)
-all_csvs <- all_csvs[ grepl("([/\\\\]practice[/\\\\])|([/\\\\]v3[/\\\\])", tolower(all_csvs)) ]
+  # --- As a last resort, optionally hydrate from FTP (GitHub workflow equivalent) ---
+  dest_csvs <- dir_csvs(dest_dir)
+  ftp_pref <- tolower(Sys.getenv("PCU_FTP_AUTO_SYNC", unset = "auto"))
+  ftp_should_attempt <- ftp_pref %in% c("true", "auto")
+  can_sync_ftp <- ftp_should_attempt && file.exists(file.path(getwd(), "automated_data_sync.R"))
+  if (!length(dest_csvs) && can_sync_ftp) {
+    ftp_attempted <- TRUE
+    message("Attempting FTP sync via automated_data_sync.R because no CSV files were found.")
+    ftp_success <- tryCatch({
+      sync_env <- new.env(parent = baseenv())
+      source("automated_data_sync.R", local = sync_env)
+      if (!isTRUE(exists("main_sync", envir = sync_env, inherits = FALSE))) {
+        stop("main_sync() not exported from automated_data_sync.R")
+      }
+      isTRUE(sync_env$main_sync())
+    }, error = function(e) {
+      ftp_error <<- conditionMessage(e)
+      FALSE
+    })
+    dest_csvs <- dir_csvs(dest_dir)
+    if (length(dest_csvs)) {
+      message("FTP sync populated data into: ", dest_dir)
+      return(list(
+        path      = normalizePath(dest_dir),
+        csvs      = dest_csvs,
+        checked   = checked_dirs,
+        archives  = archive_candidates,
+        ftp_attempted = ftp_attempted,
+        ftp_success   = ftp_success || length(dest_csvs) > 0,
+        ftp_error     = ftp_error
+      ))
+    }
+  }
+  
+  list(
+    path     = if (dir.exists(dest_dir)) normalizePath(dest_dir) else dest_dir,
+    csvs     = dest_csvs,
+    checked  = checked_dirs,
+    archives = archive_candidates,
+    ftp_attempted = ftp_attempted,
+    ftp_success   = ftp_success,
+    ftp_error     = ftp_error
+  )
+}
 
-if (!length(all_csvs)) stop("No CSVs found under: ", data_parent)
+data_info <- resolve_data_root()
+data_parent <- data_info$path
+all_csvs <- data_info$csvs
+
+if (!length(all_csvs)) {
+  details <- c(
+    sprintf("Primary path: %s", data_parent)
+  )
+  if (length(data_info$checked)) {
+    details <- c(details, sprintf("Checked directories: %s", paste(unique(data_info$checked), collapse = ", ")))
+  }
+  if (isTRUE(data_info$ftp_attempted)) {
+    details <- c(details, sprintf(
+      "FTP fallback attempted (%s)",
+      if (isTRUE(data_info$ftp_success)) "succeeded" else sprintf("failed: %s", data_info$ftp_error %||% "unknown error")
+    ))
+  }
+  if (length(data_info$archives)) {
+    details <- c(details, sprintf("Archive candidates: %s", paste(unique(data_info$archives), collapse = ", ")))
+  }
+  stop(paste(
+    "No CSV files were found for the app to load.",
+    paste(details, collapse = " | "),
+    "Set PCU_DATA_DIR to a directory containing your exports or PCU_DATA_ARCHIVE_URL to a downloadable zip bundle."
+  ))
+}
+
+keep_practice_v3 <- grepl("([/\\\\]practice[/\\\\])|([/\\\\]v3[/\\\\])", tolower(all_csvs))
+if (any(keep_practice_v3)) {
+  all_csvs <- all_csvs[keep_practice_v3]
+} else {
+  message("No practice/ V3 subdirectories detected; using all CSV files under ", data_parent)
+}
 
 # Map folder → SessionType
 infer_session_from_path <- function(fp) {
@@ -1679,7 +1836,8 @@ read_one <- function(fp) {
     VertApprAngle    = c("VAA"),
     HorzApprAngle    = c("HAA"),
     PlateLocSide     = c("PlateX"),
-    PlateLocHeight   = c("PlateZ")
+    PlateLocHeight   = c("PlateZ"),
+    PlayID           = c("PlayId", "PlayGuid", "PlayGuidId", "PlayGuidID")
   )
   
   nm <- names(df)
