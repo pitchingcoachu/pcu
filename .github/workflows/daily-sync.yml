@@ -1,4 +1,4 @@
-name: Daily GCU Data Sync and Deploy
+name: Daily PCU Data Sync and Deploy
 
 on:
   schedule:
