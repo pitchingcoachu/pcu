@@ -2055,12 +2055,31 @@ pitch_data <- pitch_data %>%
 
 # ---- Attach Cloudinary video URLs when available ----
 video_map_path <- file.path(data_parent, "video_map.csv")
+manual_map_path <- file.path(data_parent, "video_map_manual.csv")
 if (!"VideoClip"  %in% names(pitch_data)) pitch_data$VideoClip  <- NA_character_
 if (!"VideoClip2" %in% names(pitch_data)) pitch_data$VideoClip2 <- NA_character_
 if (!"VideoClip3" %in% names(pitch_data)) pitch_data$VideoClip3 <- NA_character_
 
+# Combine EdgeR and iPhone video maps
+video_maps <- list()
 if (file.exists(video_map_path)) {
-  vm_raw <- suppressMessages(readr::read_csv(video_map_path, show_col_types = FALSE))
+  edger_raw <- suppressMessages(readr::read_csv(video_map_path, show_col_types = FALSE))
+  if (nrow(edger_raw) > 0) {
+    video_maps[["edger"]] <- edger_raw
+    message("📹 Loaded ", nrow(edger_raw), " EdgeR videos")
+  }
+}
+if (file.exists(manual_map_path)) {
+  manual_raw <- suppressMessages(readr::read_csv(manual_map_path, show_col_types = FALSE))
+  if (nrow(manual_raw) > 0) {
+    video_maps[["manual"]] <- manual_raw
+    message("📱 Loaded ", nrow(manual_raw), " iPhone videos")
+  }
+}
+
+if (length(video_maps) > 0) {
+  vm_raw <- dplyr::bind_rows(video_maps) %>% dplyr::distinct()
+  message("🎬 Combined total: ", nrow(vm_raw), " videos available")
   if (nrow(vm_raw)) {
     vm_wide <- vm_raw %>%
       dplyr::mutate(
@@ -2105,11 +2124,13 @@ if (file.exists(video_map_path)) {
         ) %>%
         dplyr::select(-dplyr::ends_with(".vm"), -.play_lower)
       matched_videos <- sum(nzchar(pitch_data$VideoClip %||% ""))
-      message("Attached Cloudinary videos for ", matched_videos, " pitches via video_map.csv")
+      message("✅ Attached videos for ", matched_videos, " pitches from combined maps")
     } else {
-      message("video_map.csv loaded but no playable rows matched PlayID in pitch data.")
+      message("⚠️  Video maps loaded but no rows matched PlayID in pitch data.")
     }
   }
+} else {
+  message("ℹ️  No video map files found")
 }
 
 # Friendly load message
@@ -2164,8 +2185,6 @@ catcher_map <- setNames(raw_catchers, catch_display)
 # ==== PITCHERS-ONLY WHITELIST ====
 ALLOWED_PITCHERS <- c(
   "Stoller, Cody",
-  "Mercier, Cole",
-  "Wells, Cameron",
   "Gessner, Josh",
   "Racioppo, Frank",
   "Barker, Trey",
