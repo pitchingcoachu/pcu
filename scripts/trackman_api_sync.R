@@ -308,7 +308,12 @@ load_video_map <- function(path) {
       uploaded_at = character()
     )
   } else {
-    suppressMessages(read_csv(path, show_col_types = FALSE))
+    df <- suppressMessages(read_csv(path, show_col_types = FALSE))
+    # Ensure uploaded_at is character for consistency
+    if ("uploaded_at" %in% names(df)) {
+      df$uploaded_at <- as.character(df$uploaded_at)
+    }
+    df
   }
 }
 
