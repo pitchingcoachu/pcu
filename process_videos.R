@@ -26,38 +26,32 @@ ensure_env <- function(name) {
   val
 }
 
-parse_video_filename <- function(filename) {
-  # Expected format: session_<session-id>_<play-id>.<ext>
-  # Example: session_d527cb2a-39c9-47b4-a25d-b58bc4772f10_pitch1.mp4
-  # Or: session_practice_2024_01_02_Pitching_2024-01-02T173502_pitch1.mp4
+parse_video_filename <- function(filename, folder_name) {
+  # iPhone videos are named like IMG_7634.MOV
+  # Extract the number for ordering
+  number_match <- str_extract(filename, "\\d+")
   
-  # Remove extension
-  name_no_ext <- tools::file_path_sans_ext(filename)
-  
-  # Match pattern
-  pattern <- "^session_(.+)_(.+)$"
-  match <- str_match(name_no_ext, pattern)
-  
-  if (is.na(match[1])) {
-    warning(glue("Filename '{filename}' doesn't match expected pattern: session_<session-id>_<play-id>.<ext>"))
+  if (is.na(number_match)) {
+    warning(glue("Could not extract number from iPhone video filename: {filename}"))
     return(NULL)
   }
   
-  session_part <- match[2]
-  play_id <- match[3]
-  
-  # Try to find matching CSV file based on session identifier
-  csv_file <- find_matching_csv(session_part)
+  # Use folder name to find matching CSV
+  csv_file <- find_matching_csv_by_folder(folder_name)
   
   list(
-    session_id = session_part,
-    play_id = play_id,
+    session_id = folder_name,  # Use folder name as session ID
+    play_id = paste0("pitch_", number_match),  # Create play ID from number
     filename = filename,
-    csv_file = csv_file
+    csv_file = csv_file,
+    sort_number = as.numeric(number_match)  # For sorting
   )
 }
 
-find_matching_csv <- function(session_identifier) {
+find_matching_csv_by_folder <- function(folder_name) {
+  # Folder name example: Pitching_2025-10-14T190857
+  # Should match CSV: Pitching_2025-10-14T190857_verified.csv
+  
   # Look for CSV files in data/ directory
   csv_files <- list.files("data", pattern = "\\.csv$", full.names = TRUE)
   
@@ -69,46 +63,22 @@ find_matching_csv <- function(session_identifier) {
     return(NULL)
   }
   
-  # Strategy 1: Exact match with session identifier
-  exact_match <- csv_files[grepl(session_identifier, basename(csv_files), fixed = TRUE)]
+  # Look for exact match with folder name
+  exact_match <- csv_files[grepl(paste0("^", folder_name), basename(csv_files))]
+  
   if (length(exact_match) > 0) {
-    return(exact_match[1])  # Return first match
+    cat(glue("  📅 Matched folder '{folder_name}' to CSV: {basename(exact_match[1])}\n"))
+    return(exact_match[1])
   }
   
-  # Strategy 2: Try to extract date from session identifier and match
-  # Look for date patterns in session_identifier (YYYY-MM-DD or YYYY_MM_DD)
-  date_patterns <- c(
-    "\\d{4}-\\d{2}-\\d{2}",  # 2024-01-02
-    "\\d{4}_\\d{2}_\\d{2}"   # 2024_01_02
-  )
-  
-  for (pattern in date_patterns) {
-    extracted_date <- str_extract(session_identifier, pattern)
-    if (!is.na(extracted_date)) {
-      # Convert underscores to hyphens for standardization
-      extracted_date <- gsub("_", "-", extracted_date)
-      
-      # Look for CSV files containing this date
-      date_match <- csv_files[grepl(extracted_date, basename(csv_files))]
-      if (length(date_match) > 0) {
-        cat(glue("  📅 Matched video to CSV based on date: {basename(date_match[1])}\n"))
-        return(date_match[1])
-      }
-    }
-  }
-  
-  # Strategy 3: If no date match, let user know and return most recent CSV
-  cat(glue("  ⚠️  Could not auto-match session '{session_identifier}' to a specific CSV\n"))
+  # If no exact match, show available options
+  cat(glue("  ⚠️  Could not find CSV matching folder '{folder_name}'\n"))
   cat(glue("     Available CSV files:\n"))
   for (csv in csv_files) {
     cat(glue("       - {basename(csv)}\n"))
   }
-  cat(glue("     Using most recent CSV file\n"))
   
-  # Return most recent CSV file
-  file_info <- file.info(csv_files)
-  most_recent <- csv_files[which.max(file_info$mtime)]
-  return(most_recent)
+  return(NULL)
 }
 
 upload_to_cloudinary <- function(file_path, session_id, play_id, camera_slot, cloud_name, preset) {
@@ -174,11 +144,12 @@ update_video_map <- function(session_id, play_id, camera_slot, cloudinary_result
   cat(glue("  📝 Updated video_map.csv\n"))
 }
 
-process_video_folder <- function(date_folder, cloud_name, preset, video_map_path) {
-  cat(glue("📁 Processing folder: {basename(date_folder)}\n"))
+process_video_folder <- function(session_folder, cloud_name, preset, video_map_path) {
+  folder_name <- basename(session_folder)
+  cat(glue("📁 Processing session folder: {folder_name}\n"))
   
   # Find VideoClip2 and VideoClip3 subfolders
-  camera_folders <- list.dirs(date_folder, recursive = FALSE)
+  camera_folders <- list.dirs(session_folder, recursive = FALSE)
   camera_folders <- camera_folders[basename(camera_folders) %in% c("VideoClip2", "VideoClip3")]
   
   if (length(camera_folders) == 0) {
@@ -192,7 +163,7 @@ process_video_folder <- function(date_folder, cloud_name, preset, video_map_path
     camera_slot <- basename(camera_folder)
     cat(glue("  📹 Processing {camera_slot} videos...\n"))
     
-    # Find video files
+    # Find video files (iPhone format: IMG_####.MOV)
     video_files <- list.files(
       camera_folder, 
       pattern = "\\.(mp4|mov|avi|mkv|webm)$", 
@@ -200,33 +171,49 @@ process_video_folder <- function(date_folder, cloud_name, preset, video_map_path
       full.names = TRUE
     )
     
-    # Sort video files alphabetically to ensure consistent processing order
-    video_files <- sort(video_files)
-    
     if (length(video_files) == 0) {
       cat(glue("    ℹ️  No video files found in {camera_slot}\n"))
       next
     }
     
+    # Parse all videos first to get sorting info
+    video_info <- list()
     for (video_file in video_files) {
+      parsed <- parse_video_filename(basename(video_file), folder_name)
+      if (!is.null(parsed)) {
+        parsed$full_path <- video_file
+        video_info[[length(video_info) + 1]] <- parsed
+      }
+    }
+    
+    if (length(video_info) == 0) {
+      cat(glue("    ⚠️  No valid video files found in {camera_slot}\n"))
+      next
+    }
+    
+    # Sort videos by number (IMG_7634.MOV comes before IMG_7635.MOV)
+    video_info <- video_info[order(sapply(video_info, function(x) x$sort_number))]
+    
+    cat(glue("    📱 Found {length(video_info)} iPhone videos, processing in order:\n"))
+    for (info in video_info) {
+      cat(glue("       {info$filename} → {info$play_id}\n"))
+    }
+    
+    for (info in video_info) {
       tryCatch({
-        # Parse filename
-        parsed <- parse_video_filename(basename(video_file))
-        if (is.null(parsed)) next
-        
-        cat(glue("  🎥 Processing: {parsed$filename}\n"))
-        cat(glue("    Session: {parsed$session_id}\n"))
-        cat(glue("    Play: {parsed$play_id}\n"))
+        cat(glue("  🎥 Processing: {info$filename}\n"))
+        cat(glue("    Session: {info$session_id}\n"))
+        cat(glue("    Play: {info$play_id}\n"))
         cat(glue("    Camera: {camera_slot}\n"))
-        if (!is.null(parsed$csv_file)) {
-          cat(glue("    Target CSV: {basename(parsed$csv_file)}\n"))
+        if (!is.null(info$csv_file)) {
+          cat(glue("    Target CSV: {basename(info$csv_file)}\n"))
         }
         
         # Upload to Cloudinary
         cloudinary_result <- upload_to_cloudinary(
-          video_file, 
-          parsed$session_id, 
-          parsed$play_id, 
+          info$full_path, 
+          info$session_id, 
+          info$play_id, 
           camera_slot, 
           cloud_name, 
           preset
@@ -234,29 +221,29 @@ process_video_folder <- function(date_folder, cloud_name, preset, video_map_path
         
         # Update both video_map.csv and the specific practice CSV
         update_video_map(
-          parsed$session_id, 
-          parsed$play_id, 
+          info$session_id, 
+          info$play_id, 
           camera_slot, 
           cloudinary_result, 
           video_map_path
         )
         
         # Also update the specific practice CSV if found
-        if (!is.null(parsed$csv_file)) {
+        if (!is.null(info$csv_file)) {
           update_practice_csv(
-            parsed$csv_file,
-            parsed$session_id,
-            parsed$play_id,
+            info$csv_file,
+            info$session_id,
+            info$play_id,
             camera_slot,
             cloudinary_result$secure_url
           )
         }
         
-        processed_files <- c(processed_files, video_file)
-        cat(glue("  ✅ Successfully processed {parsed$filename}\n\n"))
+        processed_files <- c(processed_files, info$full_path)
+        cat(glue("  ✅ Successfully processed {info$filename}\n\n"))
         
       }, error = function(e) {
-        cat(glue("  ❌ Failed to process {basename(video_file)}: {e$message}\n\n"))
+        cat(glue("  ❌ Failed to process {info$filename}: {e$message}\n\n"))
       })
     }
   }
@@ -278,8 +265,9 @@ update_practice_csv <- function(csv_file, session_id, play_id, camera_slot, clou
     # This is flexible - it could match by play number, pitch number, etc.
     # You might want to customize this logic based on your CSV structure
     
-    # Strategy 1: Look for empty VideoClip2 or VideoClip3 columns
-    video_col <- paste0(camera_slot)  # VideoClip2 or VideoClip3
+    # VideoClip2 updates VideoClip2 column, VideoClip3 updates VideoClip3 column
+    # DO NOT touch VideoClip column - that's for EdgeR videos from TrackMan
+    video_col <- camera_slot  # VideoClip2 or VideoClip3
     
     if (!video_col %in% names(practice_data)) {
       # Create the column if it doesn't exist
