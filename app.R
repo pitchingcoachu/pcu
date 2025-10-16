@@ -2164,6 +2164,7 @@ catcher_map <- setNames(raw_catchers, catch_display)
 # ==== PITCHERS-ONLY WHITELIST ====
 ALLOWED_PITCHERS <- c(
   "Stoller, Cody",
+  "Mercier, Cole",
   "Gessner, Josh",
   "Racioppo, Frank",
   "Barker, Trey",
