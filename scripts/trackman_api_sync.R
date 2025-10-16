@@ -146,7 +146,13 @@ trackman_request <- function(token, url, method = "GET", body = NULL) {
   res <- req_perform(req)
   if (resp_status(res) >= 400) {
     detail <- tryCatch(resp_body_string(res), error = function(e) "")
-    cli_abort(glue("TrackMan API call failed ({resp_status(res)}): {detail}"))
+    # Don't abort on 404 errors - these are common when sessions don't exist
+    if (resp_status(res) == 404) {
+      warning(glue("TrackMan API call failed ({resp_status(res)}): {detail}"))
+      return(NULL)
+    } else {
+      cli_abort(glue("TrackMan API call failed ({resp_status(res)}): {detail}"))
+    }
   }
   res
 }
@@ -172,6 +178,7 @@ fetch_video_tokens <- function(token, session_id, env = c("practice", "game")) {
                 practice = glue("https://dataapi.trackmanbaseball.com/api/v1/media/practice/videotokens/{session_id}"),
                 game     = glue("https://dataapi.trackmanbaseball.com/api/v1/media/game/videotokens/{session_id}"))
   res <- trackman_request(token, url)
+  if (is.null(res)) return(tibble())
   tibble::as_tibble(resp_body_json(res, simplifyVector = TRUE))
 }
 
@@ -181,6 +188,7 @@ fetch_video_metadata <- function(token, session_id, env = c("practice", "game"))
                 practice = glue("https://dataapi.trackmanbaseball.com/api/v1/media/practice/videometadata/{session_id}"),
                 game     = glue("https://dataapi.trackmanbaseball.com/api/v1/media/game/videometadata/{session_id}"))
   res <- trackman_request(token, url)
+  if (is.null(res)) return(tibble())
   tibble::as_tibble(resp_body_json(res, simplifyVector = TRUE))
 }
 
