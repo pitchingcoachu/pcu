@@ -199,12 +199,15 @@ process_video_folder <- function(session_folder, cloud_name, preset, video_map_p
       cat(glue("       {info$filename} → {info$play_id}\n"))
     }
     
-    for (info in video_info) {
+    # Process videos in sequence (first video = first pitch, etc.)
+    for (i in seq_along(video_info)) {
+      info <- video_info[[i]]
       tryCatch({
-        cat(glue("  🎥 Processing: {info$filename}\n"))
+        cat(glue("  🎥 Processing: {info$filename} (sequence {i})\n"))
         cat(glue("    Session: {info$session_id}\n"))
         cat(glue("    Play: {info$play_id}\n"))
         cat(glue("    Camera: {camera_slot}\n"))
+        cat(glue("    Sequence: {i} (maps to CSV row {i})\n"))
         if (!is.null(info$csv_file)) {
           cat(glue("    Target CSV: {basename(info$csv_file)}\n"))
         }
@@ -235,12 +238,13 @@ process_video_folder <- function(session_folder, cloud_name, preset, video_map_p
             info$session_id,
             info$play_id,
             camera_slot,
-            cloudinary_result$secure_url
+            cloudinary_result$secure_url,
+            i  # Pass the sequence number
           )
         }
         
         processed_files <- c(processed_files, info$full_path)
-        cat(glue("  ✅ Successfully processed {info$filename}\n\n"))
+        cat(glue("  ✅ Successfully processed {info$filename} → CSV row {i}\n\n"))
         
       }, error = function(e) {
         cat(glue("  ❌ Failed to process {info$filename}: {e$message}\n\n"))
@@ -251,7 +255,7 @@ process_video_folder <- function(session_folder, cloud_name, preset, video_map_p
   return(processed_files)
 }
 
-update_practice_csv <- function(csv_file, session_id, play_id, camera_slot, cloudinary_url) {
+update_practice_csv <- function(csv_file, session_id, play_id, camera_slot, cloudinary_url, video_sequence) {
   if (!file.exists(csv_file)) {
     warning(glue("CSV file not found: {csv_file}"))
     return()
@@ -260,10 +264,6 @@ update_practice_csv <- function(csv_file, session_id, play_id, camera_slot, clou
   tryCatch({
     # Read the practice CSV
     practice_data <- read_csv(csv_file, show_col_types = FALSE)
-    
-    # Look for a row that matches this play
-    # This is flexible - it could match by play number, pitch number, etc.
-    # You might want to customize this logic based on your CSV structure
     
     # VideoClip2 updates VideoClip2 column, VideoClip3 updates VideoClip3 column
     # DO NOT touch VideoClip column - that's for EdgeR videos from TrackMan
@@ -274,20 +274,17 @@ update_practice_csv <- function(csv_file, session_id, play_id, camera_slot, clou
       practice_data[[video_col]] <- NA_character_
     }
     
-    # Find rows where this video column is empty (first come, first served)
-    empty_rows <- which(is.na(practice_data[[video_col]]) | practice_data[[video_col]] == "")
-    
-    if (length(empty_rows) > 0) {
-      # Use the first empty row
-      row_to_update <- empty_rows[1]
-      practice_data[[video_col]][row_to_update] <- cloudinary_url
+    # Map iPhone videos sequentially to CSV rows
+    # First iPhone video → first row, second iPhone video → second row, etc.
+    if (video_sequence <= nrow(practice_data)) {
+      practice_data[[video_col]][video_sequence] <- cloudinary_url
       
-      cat(glue("  📝 Updated {basename(csv_file)} row {row_to_update} with {camera_slot} video\n"))
+      cat(glue("  📝 Updated {basename(csv_file)} row {video_sequence} with {camera_slot} video (sequence {video_sequence})\n"))
       
       # Write back to CSV
       write_csv(practice_data, csv_file)
     } else {
-      cat(glue("  ⚠️  No empty {camera_slot} slots found in {basename(csv_file)}\n"))
+      cat(glue("  ⚠️  Video sequence {video_sequence} exceeds CSV rows ({nrow(practice_data)}) in {basename(csv_file)}\n"))
     }
     
   }, error = function(e) {
