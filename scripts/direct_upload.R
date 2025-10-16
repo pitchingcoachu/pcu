@@ -23,7 +23,7 @@ upload_local_videos <- function(local_video_dir) {
   # Get environment variables
   cloud_name <- ensure_env("CLOUDINARY_CLOUD_NAME")
   preset <- ensure_env("CLOUDINARY_UPLOAD_PRESET")
-  video_map_path <- "data/video_map.csv"
+  video_map_path <- "data/video_map_manual.csv"  # Separate file for manual uploads
   
   if (!dir.exists(local_video_dir)) {
     stop(glue("Directory not found: {local_video_dir}"))
@@ -103,9 +103,10 @@ upload_local_videos <- function(local_video_dir) {
             
             cat(glue("  ✅ Success! Video {i} → CSV row {i}\n\n"))
           
-        }, error = function(e) {
-          cat(glue("  ❌ Failed: {e$message}\n\n"))
-        })
+          }, error = function(e) {
+            cat(glue("  ❌ Failed: {e$message}\n\n"))
+          })
+        }
       }
     }
   }
