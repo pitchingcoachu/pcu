@@ -1,0 +1,15 @@
+# Example video file - replace with your actual video
+# 
+# This file shows the expected naming convention:
+# session_<session-id>_<play-id>.<extension>
+#
+# Example: session_d527cb2a-39c9-47b4-a25d-b58bc4772f10_pitch1.mp4
+#
+# When you add real videos:
+# 1. Delete this placeholder file
+# 2. Add your video files with the correct naming
+# 3. Commit to GitHub
+# 4. Videos will be processed automatically
+
+# Your video would be named something like:
+# session_practice-session-123_bullpen-pitch-1.mp4
