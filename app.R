@@ -2165,6 +2165,7 @@ catcher_map <- setNames(raw_catchers, catch_display)
 ALLOWED_PITCHERS <- c(
   "Stoller, Cody",
   "Mercier, Cole",
+  "Wells, Cameron",
   "Gessner, Josh",
   "Racioppo, Frank",
   "Barker, Trey",
