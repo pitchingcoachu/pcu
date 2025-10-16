@@ -51,43 +51,57 @@ upload_local_videos <- function(local_video_dir) {
         full.names = TRUE
       )
       
+      # Parse and sort videos first
+      video_info <- list()
       for (video_file in video_files) {
-        tryCatch({
-          parsed <- parse_video_filename(basename(video_file), folder_name)
-          if (is.null(parsed)) next
-          
-          cat(glue("  🎥 Uploading: {basename(video_file)}\n"))
-          
-          # Upload to Cloudinary
-          cloudinary_result <- upload_to_cloudinary(
-            video_file, 
-            parsed$session_id, 
-            parsed$play_id, 
-            camera_slot, 
-            cloud_name, 
-            preset
-          )
-          
-          # Update video map and CSV
-          update_video_map(
-            parsed$session_id, 
-            parsed$play_id, 
-            camera_slot, 
-            cloudinary_result, 
-            video_map_path
-          )
-          
-          if (!is.null(parsed$csv_file)) {
-            update_practice_csv(
-              parsed$csv_file,
-              parsed$session_id,
-              parsed$play_id,
-              camera_slot,
-              cloudinary_result$secure_url
+        parsed <- parse_video_filename(basename(video_file), folder_name)
+        if (!is.null(parsed)) {
+          parsed$full_path <- video_file
+          video_info[[length(video_info) + 1]] <- parsed
+        }
+      }
+      
+      # Sort by iPhone number (lowest to highest)
+      if (length(video_info) > 0) {
+        video_info <- video_info[order(sapply(video_info, function(x) x$sort_number))]
+        
+        # Process videos in sequence
+        for (i in seq_along(video_info)) {
+          info <- video_info[[i]]
+          tryCatch({
+            cat(glue("  🎥 Uploading: {info$filename} (sequence {i})\n"))
+            
+            # Upload to Cloudinary
+            cloudinary_result <- upload_to_cloudinary(
+              info$full_path, 
+              info$session_id, 
+              info$play_id, 
+              camera_slot, 
+              cloud_name, 
+              preset
             )
-          }
-          
-          cat(glue("  ✅ Success!\n\n"))
+            
+            # Update video map and CSV
+            update_video_map(
+              info$session_id, 
+              info$play_id, 
+              camera_slot, 
+              cloudinary_result, 
+              video_map_path
+            )
+            
+            if (!is.null(info$csv_file)) {
+              update_practice_csv(
+                info$csv_file,
+                info$session_id,
+                info$play_id,
+                camera_slot,
+                cloudinary_result$secure_url,
+                i  # Pass sequence number
+              )
+            }
+            
+            cat(glue("  ✅ Success! Video {i} → CSV row {i}\n\n"))
           
         }, error = function(e) {
           cat(glue("  ❌ Failed: {e$message}\n\n"))
