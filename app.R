@@ -711,6 +711,7 @@ datatable_with_colvis <- function(df, lock = character(0), remember = TRUE, defa
 stuff_cols    <- c("Pitch","#","Velo","Max","IVB","HB","rTilt","bTilt", "SpinEff","Spin","Height","Side","Ext","VAA","HAA","Stuff+")
 process_cols  <- c("Pitch","#","BF","Usage","InZone%","Comp%","Strike%","FPS%","E+A%","Whiff%","CSW%","EV","LA","Ctrl+","QP+")
 results_cols  <- c("Pitch","#","BF","IP","K%","BB%","BABIP","GB%","Barrel%","AVG","SLG","xWOBA","xISO","FIP","WHIP","Pitching+")
+results_cols_live <- c("Pitch","#","BF","K%","BB%","GB%","Barrel%","Pitching+")
 perf_cols     <- c("Pitch","#","BF","Usage","InZone%","Comp%","Strike%","FPS%","E+A%","K%","BB%","Whiff%","CSW%","EV","LA","Ctrl+","QP+","Pitching+")
 # all_table_cols will auto-include QP+ via the union
 
@@ -720,9 +721,14 @@ perf_cols     <- c("Pitch","#","BF","Usage","InZone%","Comp%","Strike%","FPS%","
 # ---- NEW: unified list for the pickers + a helper to compute visibility
 all_table_cols <- unique(c(stuff_cols, process_cols, results_cols, perf_cols))
 
-visible_set_for <- function(mode, custom = character(0)) {
+visible_set_for <- function(mode, custom = character(0), session_type = NULL) {
   if (identical(mode, "Process")) return(process_cols)
-  if (identical(mode, "Results")) return(results_cols)
+  if (identical(mode, "Results")) {
+    if (!is.null(session_type) && session_type == "Live") {
+      return(results_cols_live)
+    }
+    return(results_cols)
+  }
   if (identical(mode, "Custom"))  return(unique(c("Pitch", custom)))
   # Default
   stuff_cols
@@ -849,9 +855,16 @@ make_session_logs_table <- function(df) {
       H3       <- sum(d$PlayResult == "Triple",     na.rm = TRUE)
       HR       <- sum(d$PlayResult == "HomeRun",    na.rm = TRUE)
       H        <- H1 + H2 + H3 + HR
-      Kct_all  <- sum(d$KorBB == "Strikeout" |
-                        d$PlayResult %in% c("Strikeout","StrikeoutSwinging","StrikeoutLooking"), na.rm = TRUE)
-      BBc_all  <- sum(d$KorBB == "Walk" | d$PlayResult == "Walk", na.rm = TRUE)
+      # Live sessions: K% = 2 Strikes + (StrikeSwinging or StrikeCalled)
+      # Regular sessions: use existing logic
+      if (any(d$SessionType == "Live", na.rm = TRUE)) {
+        Kct_all  <- sum(d$Strikes == 2 & d$PitchCall %in% c("StrikeSwinging", "StrikeCalled"), na.rm = TRUE)
+        BBc_all  <- sum(d$Balls == 3 & d$PitchCall == "BallCalled", na.rm = TRUE)
+      } else {
+        Kct_all  <- sum(d$KorBB == "Strikeout" |
+                          d$PlayResult %in% c("Strikeout","StrikeoutSwinging","StrikeoutLooking"), na.rm = TRUE)
+        BBc_all  <- sum(d$KorBB == "Walk" | d$PlayResult == "Walk", na.rm = TRUE)
+      }
       ABt      <- PAt - (BBc_all + HBP_all + Sac_all)
       
       # Swings/whiffs
@@ -920,22 +933,20 @@ make_session_logs_table <- function(df) {
           nrow(d)
         ),
         `Strike%`= .s_safe_div(
-          sum(d$PitchCall %in% c("StrikeSwinging","StrikeCalled","FoulBallNotFieldable","FoulBallFieldable"),
+          sum(d$PitchCall %in% c("StrikeSwinging","StrikeCalled","InPlay","FoulBall","FoulBallNotFieldable","FoulBallFieldable"),
               na.rm = TRUE),
           nrow(d)
         ),
         `FPS%`   = .s_fmt_pct1(
-          sum(d$Balls==0 & d$Strikes==0 &
-                d$PitchCall %in% c("InPlay","StrikeSwinging","FoulBallNotFieldable","StrikeCalled"),
-              na.rm = TRUE),
+          sum(d$Balls==0 & d$Strikes==1, na.rm = TRUE),
           sum(d$Balls==0 & d$Strikes==0, na.rm = TRUE)
         ),
         `E+A%`   = .s_fmt_pct1(
           sum(d$SessionType=="Live" & (
             (d$Balls==0 & d$Strikes==0 & d$PitchCall=="InPlay") |
-              (d$Balls==0 & d$Strikes==1 & d$PitchCall %in% c("InPlay","FoulBallNotFieldable")) |
+              (d$Balls==0 & d$Strikes==1 & d$PitchCall %in% c("InPlay","FoulBallNotFieldable","FoulBall")) |
               (d$Balls==1 & d$Strikes==0 & d$PitchCall=="InPlay") |
-              (d$Balls==1 & d$Strikes==1 & d$PitchCall %in% c("InPlay","FoulBallNotFieldable")) |
+              (d$Balls==1 & d$Strikes==1 & d$PitchCall %in% c("InPlay","FoulBallNotFieldable","FoulBall")) |
               (d$Balls==0 & d$Strikes==2 & d$PitchCall %in% c("InPlay","StrikeSwinging","StrikeCalled"))
           ), na.rm = TRUE),
           sum(d$SessionType=="Live" & d$Balls==0 & d$Strikes==0, na.rm = TRUE)
@@ -2038,6 +2049,7 @@ pitch_data <- pitch_data %>%
     Catcher = as.character(Catcher),
     SessionType = factor(
       dplyr::case_when(
+        grepl("livebp", tolower(SourceFile)) ~ "Live",  # LiveBp files are Live sessions
         grepl("bull|prac", tolower(as.character(SessionType))) ~ "Bullpen",
         grepl("live|game|ab", tolower(as.character(SessionType))) ~ "Live",
         grepl("[/\\\\]practice[/\\\\]", tolower(SourceFile)) ~ "Bullpen",  # fallback: folder
@@ -2185,8 +2197,6 @@ catcher_map <- setNames(raw_catchers, catch_display)
 # ==== PITCHERS-ONLY WHITELIST ====
 ALLOWED_PITCHERS <- c(
   "Stoller, Cody",
-  "Mercier, Cole",
-  "Wells, Cameron",
   "Gessner, Josh",
   "Racioppo, Frank",
   "Barker, Trey",
@@ -2584,21 +2594,30 @@ make_summary <- function(df) {
         dplyr::n()
       ),
       StrikePercent  = safe_div(
-        sum(PitchCall %in% c("StrikeCalled","StrikeSwinging","FoulBallNotFieldable","InPlay","FoulBallFieldable"), na.rm = TRUE),
+        sum(PitchCall %in% c("StrikeCalled","StrikeSwinging","InPlay","FoulBall","FoulBallNotFieldable","FoulBallFieldable"), na.rm = TRUE),
         sum(!is.na(PitchCall))
       ),
       FPSPercent     = safe_div(
-        sum(SessionType == "Live" & Balls == 0 & Strikes == 0 &
-              PitchCall %in% c("InPlay","StrikeSwinging","FoulBallNotFieldable","StrikeCalled"), na.rm = TRUE),
+        sum(SessionType == "Live" & Balls == 0 & Strikes == 1, na.rm = TRUE),
         BF_live
       ),
       EAPercent      = safe_div(
-        sum(SessionType == "Live" & Balls == 0 & Strikes == 0 &
-              PitchCall %in% c("InPlay","StrikeSwinging","FoulBallNotFieldable"), na.rm = TRUE),
+        sum(SessionType == "Live" & (
+          (Balls == 0 & Strikes == 0 & PitchCall == "InPlay") |
+          (Balls == 0 & Strikes == 1 & PitchCall %in% c("InPlay","FoulBallNotFieldable","FoulBall")) |
+          (Balls == 1 & Strikes == 0 & PitchCall == "InPlay") |
+          (Balls == 1 & Strikes == 1 & PitchCall %in% c("InPlay","FoulBallNotFieldable","FoulBall"))
+        ), na.rm = TRUE),
         BF_live
       ),
-      KPercent       = safe_div(sum(SessionType == "Live" & KorBB == "Strikeout", na.rm = TRUE), BF_live),
-      BBPercent      = safe_div(sum(SessionType == "Live" & KorBB == "Walk",      na.rm = TRUE), BF_live),
+      KPercent       = safe_div(
+        sum(SessionType == "Live" & Strikes == 2 & PitchCall %in% c("StrikeSwinging", "StrikeCalled"), na.rm = TRUE), 
+        BF_live
+      ),
+      BBPercent      = safe_div(
+        sum(SessionType == "Live" & Balls == 3 & PitchCall == "BallCalled", na.rm = TRUE), 
+        BF_live
+      ),
       WhiffPercent   = safe_div(sum(PitchCall == "StrikeSwinging", na.rm = TRUE),
                                 sum(PitchCall %in% c("StrikeSwinging","FoulBallNotFieldable","FoulBallFieldable","InPlay"), na.rm = TRUE)),
       
@@ -5401,7 +5420,7 @@ mod_camps_server <- function(id, is_active = shiny::reactive(TRUE)) {
           )
         )
         has_pc  <- sum(!is.na(df$PitchCall)) > 0
-        strikes <- sum(df$PitchCall %in% c("StrikeCalled","StrikeSwinging","FoulBallNotFieldable","InPlay","FoulBallFieldable"), na.rm = TRUE)
+        strikes <- sum(df$PitchCall %in% c("StrikeCalled","StrikeSwinging","InPlay","FoulBall","FoulBallNotFieldable","FoulBallFieldable"), na.rm = TRUE)
         sw      <- sum(df$PitchCall == "StrikeSwinging", na.rm = TRUE)
         den     <- sum(df$PitchCall %in% c("StrikeSwinging","FoulBallNotFieldable","FoulBallFieldable","InPlay"), na.rm = TRUE)
         
@@ -6142,7 +6161,7 @@ mod_leader_server <- function(id, is_active = shiny::reactive(TRUE)) {
           )
         )
         has_pc  <- sum(!is.na(df$PitchCall)) > 0
-        strikes <- sum(df$PitchCall %in% c("StrikeCalled","StrikeSwinging","FoulBallNotFieldable","InPlay","FoulBallFieldable"), na.rm = TRUE)
+        strikes <- sum(df$PitchCall %in% c("StrikeCalled","StrikeSwinging","InPlay","FoulBall","FoulBallNotFieldable","FoulBallFieldable"), na.rm = TRUE)
         sw      <- sum(df$PitchCall == "StrikeSwinging", na.rm = TRUE)
         den     <- sum(df$PitchCall %in% c("StrikeSwinging","FoulBallNotFieldable","FoulBallFieldable","InPlay"), na.rm = TRUE)
         csw_all  <- sum(df$PitchCall %in% c("StrikeCalled","StrikeSwinging"), na.rm = TRUE)
@@ -7529,7 +7548,7 @@ mod_comp_server <- function(id, is_active = shiny::reactive(TRUE)) {
         )
       )
       has_pc  <- sum(!is.na(df$PitchCall)) > 0
-      strikes <- sum(df$PitchCall %in% c("StrikeCalled","StrikeSwinging","FoulBallNotFieldable","InPlay","FoulBallFieldable"), na.rm = TRUE)
+      strikes <- sum(df$PitchCall %in% c("StrikeCalled","StrikeSwinging","InPlay","FoulBall","FoulBallNotFieldable","FoulBallFieldable"), na.rm = TRUE)
       sw      <- sum(df$PitchCall == "StrikeSwinging", na.rm = TRUE)
       den     <- sum(df$PitchCall %in% c("StrikeSwinging","FoulBallNotFieldable","FoulBallFieldable","InPlay"), na.rm = TRUE)
       bf_live <- sum(df$SessionType == "Live" & df$Balls == 0 & df$Strikes == 0, na.rm = TRUE)
@@ -11719,7 +11738,20 @@ server <- function(input, output, session) {
       label_column = "Pitch"
     ))
 
-    visible_set <- visible_set_for(mode, custom)
+    # Determine if this is a Live session and modify visible set accordingly
+    has_live_data <- any(df$SessionType == "Live", na.rm = TRUE)
+    if (identical(mode, "Results") && has_live_data) {
+      visible_set <- results_cols_live
+    } else {
+      visible_set <- visible_set_for(mode, custom)
+    }
+    
+    # Remove unwanted columns for Live sessions
+    if (has_live_data && identical(mode, "Results")) {
+      cols_to_remove <- c("IP", "WHIP", "AVG", "SLG", "FIP", "xWOBA", "xISO", "BABIP")
+      df_disp <- df_disp[, !names(df_disp) %in% cols_to_remove, drop = FALSE]
+    }
+    
     datatable_with_colvis(
       df_disp,
       lock            = "Pitch",
@@ -12022,7 +12054,20 @@ server <- function(input, output, session) {
         label_column = "Pitch"
       ))
 
-      visible_set <- visible_set_for(mode, custom)
+      # Determine if this is a Live session and modify visible set accordingly
+      has_live_data <- any(df$SessionType == "Live", na.rm = TRUE)
+      if (identical(mode, "Results") && has_live_data) {
+        visible_set <- results_cols_live
+      } else {
+        visible_set <- visible_set_for(mode, custom)
+      }
+      
+      # Remove unwanted columns for Live sessions
+      if (has_live_data && identical(mode, "Results")) {
+        cols_to_remove <- c("IP", "WHIP", "AVG", "SLG", "FIP", "xWOBA", "xISO", "BABIP")
+        df_disp <- df_disp[, !names(df_disp) %in% cols_to_remove, drop = FALSE]
+      }
+      
       return(datatable_with_colvis(
         df_disp,
         lock            = "Pitch",
@@ -13785,9 +13830,9 @@ server <- function(input, output, session) {
   output$eaTrendPlot <- renderPlot({
     df <- filtered_data(); req(nrow(df) > 0)
     is_EA <- (df$Balls == 0 & df$Strikes == 0 & df$PitchCall == "InPlay") |
-      (df$Balls == 0 & df$Strikes == 1 & df$PitchCall %in% c("InPlay","FoulBallNotFieldable")) |
+      (df$Balls == 0 & df$Strikes == 1 & df$PitchCall %in% c("InPlay","FoulBall","FoulBallNotFieldable")) |
       (df$Balls == 1 & df$Strikes == 0 & df$PitchCall == "InPlay") |
-      (df$Balls == 1 & df$Strikes == 1 & df$PitchCall %in% c("InPlay","FoulBallNotFieldable")) |
+      (df$Balls == 1 & df$Strikes == 1 & df$PitchCall %in% c("InPlay","FoulBall","FoulBallNotFieldable")) |
       (df$Balls == 0 & df$Strikes == 2 & df$PitchCall %in% c("InPlay","StrikeSwinging","StrikeCalled"))
     df$EA_flag <- is_EA
     
