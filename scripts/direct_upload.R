@@ -1,7 +1,5 @@
-#!/usr/bin/env Rscrip  # Get environment variables
-  cloud_name <- ensure_env("CLOUDINARY_CLOUD_NAME")
-  preset <- ensure_env("CLOUDINARY_UPLOAD_PRESET")
-  video_map_path <- "data/video_map_manual.csv"  # Separate file for manual uploads# Direct Video Upload Script
+#!/usr/bin/env Rscript
+# Direct Video Upload Script
 # --------------------------
 # Upload videos directly to Cloudinary without going through GitHub
 # Useful for large video files or bulk uploads
