@@ -709,20 +709,17 @@ datatable_with_colvis <- function(df, lock = character(0), remember = TRUE, defa
 
 # Default column sets for the table-mode toggle
 stuff_cols    <- c("Pitch","#","Velo","Max","IVB","HB","rTilt","bTilt", "SpinEff","Spin","Height","Side","Ext","VAA","HAA","Stuff+")
-process_cols  <- c("Pitch","#","BF","InZone%","Comp%","Strike%","FPS%","E+A%")
-results_cols  <- c("Pitch","#","BF","IP","K%","BB%","BABIP","Swing%","GB%","Whiff%","CSW%","EV","LA","Barrel%","AVG","SLG","xWOBA","xISO","FIP","WHIP","Pitching+")
-results_cols_live <- c("Pitch","#","BF","K%","BB%","Swing%","GB%","Whiff%","CSW%","Barrel%","Pitching+")
-usage_cols    <- c("Pitch","#","BF","Usage","0-0","Behind","Even","Ahead","<2K","2K")
-bullpen_cols  <- c("Pitch","#","Velo","Max","IVB","HB","Height","Side","Ext","InZone%","Comp%","Stuff+","Ctrl+")
-live_cols     <- c("Pitch","#","Velo","Max","IVB","HB","InZone%","Strike%","FPS%","E+A%","Whiff%","CSW%","K%","BB%","QP+")
+process_cols  <- c("Pitch","#","BF","Usage","InZone%","Comp%","Strike%","FPS%","E+A%","Whiff%","CSW%","EV","LA","Ctrl+","QP+")
+results_cols  <- c("Pitch","#","BF","IP","K%","BB%","BABIP","GB%","Barrel%","AVG","SLG","xWOBA","xISO","FIP","WHIP","Pitching+")
+results_cols_live <- c("Pitch","#","BF","K%","BB%","GB%","Barrel%","Pitching+")
 perf_cols     <- c("Pitch","#","BF","Usage","InZone%","Comp%","Strike%","FPS%","E+A%","K%","BB%","Whiff%","CSW%","EV","LA","Ctrl+","QP+","Pitching+")
 # all_table_cols will auto-include QP+ via the union
 
 # Default column sets for the table-mode toggle (you already have these)
-# stuff_cols, process_cols, results_cols, usage_cols, bullpen_cols, live_cols, perf_cols
+# stuff_cols, process_cols, results_cols, perf_cols
 
 # ---- NEW: unified list for the pickers + a helper to compute visibility
-all_table_cols <- unique(c(stuff_cols, process_cols, results_cols, usage_cols, bullpen_cols, live_cols, perf_cols))
+all_table_cols <- unique(c(stuff_cols, process_cols, results_cols, perf_cols))
 
 visible_set_for <- function(mode, custom = character(0), session_type = NULL) {
   if (identical(mode, "Process")) return(process_cols)
@@ -732,9 +729,6 @@ visible_set_for <- function(mode, custom = character(0), session_type = NULL) {
     }
     return(results_cols)
   }
-  if (identical(mode, "Usage"))   return(usage_cols)
-  if (identical(mode, "Bullpen")) return(bullpen_cols)
-  if (identical(mode, "Live"))    return(live_cols)
   if (identical(mode, "Custom"))  return(unique(c("Pitch", custom)))
   # Default
   stuff_cols
@@ -5303,7 +5297,7 @@ mod_camps_server <- function(id, is_active = shiny::reactive(TRUE)) {
       sel <- isolate(input$campPitchMode); if (is.null(sel)) sel <- "Stuff"
       tagList(
         radioButtons(ns("campPitchMode"), label = NULL,
-                     choices = c("Stuff","Process","Results","Usage","Bullpen","Live","Custom"),
+                     choices = c("Stuff","Process","Results","Custom"),
                      selected = sel, inline = TRUE),
         conditionalPanel(
           sprintf("input['%s']=='Custom'", ns("campPitchMode")),
@@ -6122,7 +6116,7 @@ mod_leader_server <- function(id, is_active = shiny::reactive(TRUE)) {
       sel <- isolate(input$lbMode); if (is.null(sel)) sel <- "Stuff"
       tagList(
         radioButtons(ns("lbMode"), label = NULL,
-                     choices = c("Stuff","Process","Results","Usage","Bullpen","Live","Custom"),
+                     choices = c("Stuff","Process","Results","Custom"),
                      selected = sel, inline = TRUE),
         conditionalPanel(
           sprintf("input['%s']=='Custom'", ns("lbMode")),
@@ -6761,7 +6755,7 @@ mod_comp_ui <- function(id, show_header = FALSE) {
               tagList(
                 radioButtons(
                   ns("cmpA_tableMode"), label = NULL,
-                  choices  = c("Stuff","Process","Results","Usage","Bullpen","Live","Custom"),
+                  choices  = c("Stuff","Process","Results","Custom"),
                   selected = "Stuff",
                   inline   = TRUE
                 ),
@@ -6781,7 +6775,7 @@ mod_comp_ui <- function(id, show_header = FALSE) {
               tagList(
                 radioButtons(
                   ns("cmpB_tableMode"), label = NULL,
-                  choices  = c("Stuff","Process","Results","Usage","Bullpen","Live","Custom"),
+                  choices  = c("Stuff","Process","Results","Custom"),
                   selected = "Stuff",
                   inline   = TRUE
                 ),
@@ -10283,7 +10277,7 @@ server <- function(input, output, session) {
     tagList(
       radioButtons(
         "summaryTableMode", label = NULL,
-        choices  = c("Stuff","Process","Results","Usage","Bullpen","Live","Custom"),
+        choices  = c("Stuff","Process","Results","Custom"),
         selected = sel,
         inline   = TRUE
       ),
@@ -10309,9 +10303,9 @@ server <- function(input, output, session) {
     tagList(
       radioButtons(
         "dpTableMode", label = NULL,
-        choices  = c("Stuff","Process","Results","Usage","Bullpen","Live","Custom"),
+        choices  = c("Stuff","Process","Results","Custom"),
         selected = sel,
-        inline   = True
+        inline   = TRUE
       ),
       conditionalPanel(
         "input.dpTableMode=='Custom'",
@@ -10334,7 +10328,7 @@ server <- function(input, output, session) {
     tagList(
       radioButtons(
         "leaderboardMode", label = NULL,
-        choices  = c("Stuff","Process","Results","Usage","Bullpen","Live","Custom"),
+        choices  = c("Stuff","Process","Results","Custom"),
         selected = sel,
         inline   = TRUE
       ),
@@ -10769,8 +10763,8 @@ server <- function(input, output, session) {
     tagList(
       radioButtons(
         "sessMode", label = NULL,
-        choices  = c("Stuff","Process","Results","Usage","Bullpen","Live","Custom"),
-        selected = sel, inline = True
+        choices  = c("Stuff","Process","Results","Custom"),
+        selected = sel, inline = TRUE
       ),
       conditionalPanel(
         "input.sessMode=='Custom'",
@@ -12347,9 +12341,12 @@ server <- function(input, output, session) {
   
   # Terminal pitch = PA completed
   .abp_is_terminal <- function(df) {
-    (!is.na(df$PlayResult) & df$PlayResult != "Undefined") |
-      (!is.na(df$KorBB)     & df$KorBB %in% c("Strikeout","Walk")) |
-      (!is.na(df$PitchCall) & df$PitchCall == "HitByPitch")
+    # Use Live session logic for strikeouts and walks, plus InPlay for contact
+    (!is.na(df$Strikes) & !is.na(df$PitchCall) & df$Strikes == 2 & 
+     df$PitchCall %in% c("StrikeSwinging", "StrikeCalled")) |          # Strikeout
+    (!is.na(df$Balls) & !is.na(df$PitchCall) & df$Balls == 3 & 
+     df$PitchCall == "BallCalled") |                                    # Walk
+    (!is.na(df$PitchCall) & df$PitchCall == "InPlay")                  # Ball in play
   }
   
   .abp_fmt_mdy <- function(d) format(as.Date(d), "%m/%d/%Y")
