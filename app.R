@@ -784,7 +784,7 @@ wrap_pitch_counts <- function(x) {
 }
 
 
-datatable_with_colvis <- function(df, lock = character(0), remember = TRUE, default_visible = names(df)) {
+datatable_with_colvis <- function(df, lock = character(0), remember = TRUE, default_visible = names(df), mode = NULL) {
   df <- sanitize_for_dt(df)   # <- central fix
   df <- blank_ea_except_all(df)
   default_visible <- intersect(default_visible, names(df))
@@ -803,7 +803,8 @@ datatable_with_colvis <- function(df, lock = character(0), remember = TRUE, defa
     defs <- c(defs, list(list(visible = FALSE, targets = hide_idx)))
   }
   
-  DT::datatable(
+  # Create the datatable
+  dt <- DT::datatable(
     df,
     rownames   = FALSE,
     extensions = c('Buttons','ColReorder','FixedHeader'),
@@ -823,6 +824,57 @@ datatable_with_colvis <- function(df, lock = character(0), remember = TRUE, defa
       columnDefs    = defs
     )
   )
+  
+  # Apply color coding for Process and Live tables by modifying the data directly
+  if ((identical(mode, "Process") || identical(mode, "Live")) && "Pitch" %in% names(df)) {
+    # Define columns to color code based on mode
+    if (identical(mode, "Process")) {
+      color_cols <- c("InZone%", "Comp%", "Strike%", "Swing%", "FPS%", "E+A%", "Ctrl+", "QP+", "Pitching+")
+    } else if (identical(mode, "Live")) {
+      color_cols <- c("InZone%", "Strike%", "FPS%", "E+A%", "QP+", "K%", "BB%", "Whiff%")
+    }
+    
+    available_cols <- intersect(color_cols, names(df))
+    
+    for (col in available_cols) {
+      # Pre-calculate colors and apply as HTML styling
+      for (i in seq_len(nrow(df))) {
+        if (!is.na(df[[col]][i]) && df[[col]][i] != "") {
+          colors <- get_color_scale(df[[col]][i], col, df$Pitch[i])
+          df[[col]][i] <- paste0(
+            '<span style="background-color:', colors$bg, 
+            '; color:', colors$text,
+            '; padding: 2px 4px; border-radius: 3px; display: inline-block; width: 100%; text-align: center;">',
+            df[[col]][i], '</span>'
+          )
+        }
+      }
+    }
+    
+    # Recreate the datatable with the styled data
+    dt <- DT::datatable(
+      df,
+      rownames   = FALSE,
+      extensions = c('Buttons','ColReorder','FixedHeader'),
+      escape     = FALSE,
+      options = list(
+        dom           = 'Bfrtip',
+        buttons       = list(
+          'pageLength',
+          list(extend = 'colvis', text = 'Columns', columns = colvis_idx, postfixButtons = list('colvisRestore'))
+        ),
+        colReorder    = TRUE,
+        fixedHeader   = TRUE,
+        stateSave     = remember,
+        stateDuration = -1,
+        pageLength    = 10,
+        autoWidth     = TRUE,
+        columnDefs    = defs
+      )
+    )
+  }
+  
+  return(dt)
 }
 
 # Default column sets for the table-mode toggle
@@ -1418,7 +1470,8 @@ pctify <- function(x) {
     disp_table,
     lock            = "Pitch",
     remember        = FALSE,
-    default_visible = intersect(visible_set, names(disp_table))
+    default_visible = intersect(visible_set, names(disp_table)),
+    mode            = mode
   )
 }
 
@@ -1680,6 +1733,145 @@ fmt_num2  <- function(x) ifelse(is.finite(x), sprintf("%.2f", x), "")
 fmt_pct1  <- function(num, den) {
   num <- suppressWarnings(as.numeric(num)); den <- suppressWarnings(as.numeric(den))
   if (is.finite(den) && den > 0 && is.finite(num)) paste0(round(100*num/den, 1), "%") else ""
+}
+
+# ---- Color coding function for Process tables ----
+get_color_scale <- function(value, column_name, pitch_type) {
+  # Convert percentage strings to numeric values
+  if (is.character(value)) {
+    value <- suppressWarnings(as.numeric(gsub("%", "", value)))
+  }
+  
+  if (is.na(value) || !is.finite(value)) {
+    return(list(bg = "white", text = "black"))
+  }
+  
+  # Define thresholds based on column and pitch type
+  thresholds <- get_process_thresholds(column_name, pitch_type)
+  if (is.null(thresholds)) return(list(bg = "white", text = "black"))
+  
+  poor <- thresholds$poor
+  avg <- thresholds$avg
+  great <- thresholds$great
+  
+  # Create 5-point color scale: Blue (poor) -> Light Blue -> White (avg) -> Light Red -> Red (great)
+  # Return both background color and text color for darker backgrounds
+  if (value <= poor) {
+    return(list(bg = "#0066CC", text = "white"))  # Dark Blue - white text
+  } else if (value <= (poor + avg) / 2) {
+    return(list(bg = "#66B2FF", text = "black"))  # Light Blue - black text
+  } else if (value <= avg) {
+    return(list(bg = "#FFFFFF", text = "black"))  # White (average) - black text
+  } else if (value <= (avg + great) / 2) {
+    return(list(bg = "#FFB3B3", text = "black"))  # Light Red - black text
+  } else if (value <= great) {
+    return(list(bg = "#FF6666", text = "white"))  # Medium Red - white text
+  } else {
+    return(list(bg = "#CC0000", text = "white"))  # Dark Red - white text
+  }
+}
+
+get_process_thresholds <- function(column_name, pitch_type) {
+  # Normalize pitch type
+  pitch_type <- tolower(as.character(pitch_type))
+  
+  # InZone% thresholds
+  if (column_name == "InZone%") {
+    if (pitch_type %in% c("fastball", "sinker")) {
+      return(list(poor = 43, avg = 50, great = 57))
+    } else if (pitch_type %in% c("cutter", "slider", "sweeper", "curveball")) {
+      return(list(poor = 37, avg = 43, great = 49))
+    } else if (pitch_type %in% c("changeup", "splitter", "knuckleball")) {
+      return(list(poor = 30, avg = 37, great = 44))
+    } else if (pitch_type == "all") {
+      return(list(poor = 42, avg = 47, great = 52))
+    }
+  }
+  
+  # Comp% thresholds
+  if (column_name == "Comp%") {
+    if (pitch_type %in% c("fastball", "sinker")) {
+      return(list(poor = 79, avg = 83, great = 87))
+    } else if (pitch_type %in% c("cutter", "slider", "sweeper", "curveball")) {
+      return(list(poor = 70, avg = 76, great = 82))
+    } else if (pitch_type %in% c("changeup", "splitter", "knuckleball")) {
+      return(list(poor = 65, avg = 74, great = 83))
+    } else if (pitch_type == "all") {
+      return(list(poor = 76, avg = 79, great = 82))
+    }
+  }
+  
+  # Strike% thresholds (same for all pitch types)
+  if (column_name == "Strike%") {
+    return(list(poor = 57, avg = 62, great = 67))
+  }
+  
+  # Swing% thresholds
+  if (column_name == "Swing%") {
+    if (pitch_type %in% c("fastball", "sinker")) {
+      return(list(poor = 40, avg = 44, great = 48))
+    } else if (pitch_type %in% c("cutter", "slider", "sweeper")) {
+      return(list(poor = 37, avg = 43, great = 49))
+    } else if (pitch_type == "curveball") {
+      return(list(poor = 28, avg = 35, great = 42))
+    } else if (pitch_type %in% c("changeup", "splitter")) {
+      return(list(poor = 43, avg = 47, great = 51))
+    } else if (pitch_type == "all") {
+      return(list(poor = 40, avg = 45, great = 50))
+    }
+  }
+  
+  # FPS% thresholds (same for all pitch types including individual pitches)
+  if (column_name == "FPS%") {
+    return(list(poor = 55, avg = 60, great = 65))
+  }
+  
+  # E+A% thresholds (only for All row)
+  if (column_name == "E+A%" && pitch_type == "all") {
+    return(list(poor = 65, avg = 70, great = 75))
+  }
+  
+  # Ctrl+ thresholds (only for All row)
+  if (column_name == "Ctrl+" && pitch_type == "all") {
+    return(list(poor = 75, avg = 85, great = 95))
+  }
+  
+  # QP+ thresholds (only for All row)
+  if (column_name == "QP+" && pitch_type == "all") {
+    return(list(poor = 75, avg = 90, great = 105))
+  }
+  
+  # Pitching+ thresholds (only for All row)
+  if (column_name == "Pitching+" && pitch_type == "all") {
+    return(list(poor = 80, avg = 95, great = 110))
+  }
+  
+  # K% thresholds (only for All row)
+  if (column_name == "K%" && pitch_type == "all") {
+    return(list(poor = 18, avg = 23, great = 28))
+  }
+  
+  # BB% thresholds (only for All row)
+  if (column_name == "BB%" && pitch_type == "all") {
+    return(list(poor = 11, avg = 9, great = 7))
+  }
+  
+  # Whiff% thresholds
+  if (column_name == "Whiff%") {
+    if (pitch_type == "fastball") {
+      return(list(poor = 18, avg = 22, great = 26))
+    } else if (pitch_type == "sinker") {
+      return(list(poor = 9, avg = 13, great = 17))
+    } else if (pitch_type == "cutter") {
+      return(list(poor = 22, avg = 27, great = 32))
+    } else if (pitch_type %in% c("sweeper", "curveball", "slider", "changeup", "splitter")) {
+      return(list(poor = 29, avg = 35, great = 41))
+    } else if (pitch_type == "all") {
+      return(list(poor = 21, avg = 26, great = 31))
+    }
+  }
+  
+  return(NULL)
 }
 
 make_hover_tt <- function(df) {
@@ -2897,7 +3089,6 @@ catcher_map <- setNames(raw_catchers, catch_display)
 # ==== PITCHERS-ONLY WHITELIST ====
 ALLOWED_PITCHERS <- c(
   "Stoller, Cody",
-  "Silverio, Joseph",
   "Gessner, Josh",
   "Racioppo, Frank",
   "Barker, Trey",
@@ -12141,7 +12332,8 @@ server <- function(input, output, session) {
       df_disp,
       lock            = "Pitch",
       remember        = FALSE,
-      default_visible = intersect(visible_set, names(df_disp))
+      default_visible = intersect(visible_set, names(df_disp)),
+      mode            = mode
     )
   })
   
@@ -12492,7 +12684,8 @@ server <- function(input, output, session) {
         df_disp,
         lock            = "Pitch",
         remember        = FALSE,
-        default_visible = intersect(visible_set, names(df_disp))
+        default_visible = intersect(visible_set, names(df_disp)),
+        mode            = mode
       ))
     }
     
@@ -12681,7 +12874,8 @@ server <- function(input, output, session) {
       df_disp,
       lock            = "Pitch",
       remember        = FALSE,
-      default_visible = intersect(visible_set, names(df_disp))
+      default_visible = intersect(visible_set, names(df_disp)),
+      mode            = mode
     )
   })
   
