@@ -3091,6 +3091,7 @@ ALLOWED_PITCHERS <- c(
   "Stoller, Cody",
   "Gessner, Josh",
   "Racioppo, Frank",
+  "Silverio, Joseph",
   "Barker, Trey",
   "Blanco, Adrian",
   "Nichols, Logan",
