@@ -831,7 +831,7 @@ datatable_with_colvis <- function(df, lock = character(0), remember = TRUE, defa
     if (identical(mode, "Process")) {
       color_cols <- c("InZone%", "Comp%", "Strike%", "Swing%", "FPS%", "E+A%", "Ctrl+", "QP+", "Pitching+")
     } else if (identical(mode, "Live")) {
-      color_cols <- c("InZone%", "Strike%", "FPS%", "E+A%", "QP+", "K%", "BB%", "Whiff%")
+      color_cols <- c("InZone%", "Strike%", "FPS%", "E+A%", "QP+", "Ctrl+", "Pitching+", "K%", "BB%", "Whiff%")
     }
     
     available_cols <- intersect(color_cols, names(df))
@@ -1831,18 +1831,18 @@ get_process_thresholds <- function(column_name, pitch_type) {
     return(list(poor = 65, avg = 70, great = 75))
   }
   
-  # Ctrl+ thresholds (only for All row)
-  if (column_name == "Ctrl+" && pitch_type == "all") {
+  # Ctrl+ thresholds (same for all pitch types)
+  if (column_name == "Ctrl+") {
     return(list(poor = 75, avg = 85, great = 95))
   }
   
-  # QP+ thresholds (only for All row)
-  if (column_name == "QP+" && pitch_type == "all") {
+  # QP+ thresholds (same for all pitch types)
+  if (column_name == "QP+") {
     return(list(poor = 75, avg = 90, great = 105))
   }
   
-  # Pitching+ thresholds (only for All row)
-  if (column_name == "Pitching+" && pitch_type == "all") {
+  # Pitching+ thresholds (same for all pitch types)
+  if (column_name == "Pitching+") {
     return(list(poor = 80, avg = 95, great = 110))
   }
   
@@ -3091,9 +3091,9 @@ ALLOWED_PITCHERS <- c(
   "Stoller, Cody",
   "Gessner, Josh",
   "Racioppo, Frank",
-  "Silverio, Joseph",
   "Barker, Trey",
   "Blanco, Adrian",
+  "Silverio, Joseph",
   "Nichols, Logan",
   "Tseng, Andrew",
   "Wallace, Ren",
@@ -3341,7 +3341,7 @@ compute_usage_by_count <- function(df, original_df = NULL) {
   dplyr::bind_rows(out, all_row)
 }
 
-compute_process_results <- function(df) {
+compute_process_results <- function(df, mode = "All") {
   # split by pitch *as character*, not factor (prevents int/chr mixups later)
   by_pt <- split(
     df,
@@ -3476,13 +3476,24 @@ compute_process_results <- function(df) {
     WHIP <- if (tot_outs > 0) fmt_num2((H + BB_ct) / ip_num) else ""
     
     # K% and BB% divided by BF (batters faced)
-    K_pct <- if (BF_all > 0) {
-      paste0(round(100 * K_ct_all / BF_all, 1), "%")
-    } else ""
-    
-    BB_pct <- if (BF_all > 0) {
-      paste0(round(100 * BB_ct_all / BF_all, 1), "%")
-    } else ""
+    # Use Live-specific counts if mode is "Live", otherwise use all counts
+    if (mode == "Live") {
+      K_pct <- if (BF_live > 0) {
+        paste0(round(100 * K_ct / BF_live, 1), "%")
+      } else ""
+      
+      BB_pct <- if (BF_live > 0) {
+        paste0(round(100 * BB_ct / BF_live, 1), "%")
+      } else ""
+    } else {
+      K_pct <- if (BF_all > 0) {
+        paste0(round(100 * K_ct_all / BF_all, 1), "%")
+      } else ""
+      
+      BB_pct <- if (BF_all > 0) {
+        paste0(round(100 * BB_ct_all / BF_all, 1), "%")
+      } else ""
+    }
     
     # Whiff% calculation
     whiff_pct <- if (pitch_n > 0) {
@@ -7163,7 +7174,7 @@ mod_leader_server <- function(id, is_active = shiny::reactive(TRUE)) {
       
       df2
     })
-    
+
     # Domain-aware filtered data (LSU-only)
     filtered_lb <- reactive({
       df <- filtered_lb_before_pitch_type()
@@ -12275,7 +12286,7 @@ server <- function(input, output, session) {
     
     # Add Process/Results columns and SANITIZE for DT
     existing_cols <- names(df_table)
-    extras <- compute_process_results(df) %>%
+    extras <- compute_process_results(df, mode) %>%
       dplyr::rename(Pitch = PitchType) %>%
       dplyr::mutate(Pitch = as.character(Pitch)) %>%
       dplyr::select(Pitch, dplyr::any_of(setdiff(names(.), existing_cols)))
@@ -12480,7 +12491,7 @@ server <- function(input, output, session) {
         )
       
       # Extras (xWOBA/xISO/BABIP/Barrel%) — numeric
-      extras <- compute_process_results(df) %>%
+      extras <- compute_process_results(df, mode) %>%
         dplyr::rename_with(~ "Pitch", dplyr::any_of("PitchType")) %>%
         dplyr::mutate(Pitch = as.character(Pitch))
       if (nrow(extras)) {
