@@ -1781,6 +1781,23 @@ get_color_scale <- function(value, column_name, pitch_type) {
     }
   }
   
+  # Special handling for Barrel% - reverse the color logic since lower is better for pitchers
+  if (column_name == "Barrel%") {
+    if (value >= poor) {
+      return(list(bg = "#0066CC", text = "white"))  # Dark Blue - high Barrel% is bad
+    } else if (value >= (poor + avg) / 2) {
+      return(list(bg = "#66B2FF", text = "black"))  # Light Blue
+    } else if (value >= avg) {
+      return(list(bg = "#FFFFFF", text = "black"))  # White (average)
+    } else if (value >= (avg + great) / 2) {
+      return(list(bg = "#FFB3B3", text = "black"))  # Light Red
+    } else if (value >= great) {
+      return(list(bg = "#FF6666", text = "white"))  # Medium Red
+    } else {
+      return(list(bg = "#CC0000", text = "white"))  # Dark Red - low Barrel% is great
+    }
+  }
+  
   # Standard logic for all other metrics (higher is better)
   if (value <= poor) {
     return(list(bg = "#0066CC", text = "white"))  # Dark Blue - white text
