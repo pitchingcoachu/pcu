@@ -832,6 +832,10 @@ datatable_with_colvis <- function(df, lock = character(0), remember = TRUE, defa
       color_cols <- c("InZone%", "Comp%", "Strike%", "Swing%", "FPS%", "E+A%", "Ctrl+", "QP+", "Pitching+")
     } else if (identical(mode, "Live")) {
       color_cols <- c("InZone%", "Strike%", "FPS%", "E+A%", "QP+", "Ctrl+", "Pitching+", "K%", "BB%", "Whiff%")
+    } else if (identical(mode, "Results")) {
+      color_cols <- c("Whiff%", "K%", "BB%", "CSW%", "GB%", "Barrel%", "EV")
+    } else if (identical(mode, "Bullpen")) {
+      color_cols <- c("InZone%", "Comp%", "Ctrl+", "Stuff+")
     }
     
     available_cols <- intersect(color_cols, names(df))
@@ -1869,6 +1873,49 @@ get_process_thresholds <- function(column_name, pitch_type) {
     } else if (pitch_type == "all") {
       return(list(poor = 21, avg = 26, great = 31))
     }
+  }
+  
+  # CSW% thresholds
+  if (column_name == "CSW%") {
+    if (pitch_type %in% c("fastball", "sinker")) {
+      return(list(poor = 23, avg = 27, great = 31))
+    } else if (pitch_type %in% c("cutter", "slider", "sweeper", "curveball")) {
+      return(list(poor = 29, avg = 32, great = 35))
+    } else if (pitch_type %in% c("splitter", "changeup")) {
+      return(list(poor = 22, avg = 28, great = 34))
+    } else if (pitch_type == "all") {
+      return(list(poor = 26, avg = 29, great = 32))
+    }
+  }
+  
+  # GB% thresholds
+  if (column_name == "GB%") {
+    if (pitch_type == "fastball") {
+      return(list(poor = 31, avg = 39, great = 47))
+    } else if (pitch_type == "sinker") {
+      return(list(poor = 43, avg = 54, great = 65))
+    } else if (pitch_type %in% c("cutter", "slider", "sweeper", "curveball")) {
+      return(list(poor = 36, avg = 43, great = 50))
+    } else if (pitch_type %in% c("changeup", "splitter")) {
+      return(list(poor = 35, avg = 47, great = 59))
+    } else if (pitch_type == "all") {
+      return(list(poor = 38, avg = 43, great = 48))
+    }
+  }
+  
+  # Barrel% thresholds (same for all pitch types)
+  if (column_name == "Barrel%") {
+    return(list(poor = 20, avg = 15, great = 10))
+  }
+  
+  # EV thresholds (same for all pitch types)
+  if (column_name == "EV") {
+    return(list(poor = 95, avg = 85, great = 75))
+  }
+  
+  # Stuff+ thresholds (same for all pitch types)
+  if (column_name == "Stuff+") {
+    return(list(poor = 90, avg = 100, great = 110))
   }
   
   return(NULL)
@@ -3091,9 +3138,10 @@ ALLOWED_PITCHERS <- c(
   "Stoller, Cody",
   "Gessner, Josh",
   "Racioppo, Frank",
+  "Silverio, Joseph",
+  "Wells, Cameron",
   "Barker, Trey",
   "Blanco, Adrian",
-  "Silverio, Joseph",
   "Nichols, Logan",
   "Tseng, Andrew",
   "Wallace, Ren",
