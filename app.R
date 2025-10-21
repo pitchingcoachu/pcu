@@ -7327,7 +7327,8 @@ mod_leader_server <- function(id, is_active = shiny::reactive(TRUE)) {
         disp_tbl,
         lock            = "Player",
         remember        = FALSE,
-        default_visible = intersect(visible_set, names(disp_tbl))
+        default_visible = intersect(visible_set, names(disp_tbl)),
+        mode            = mode
       )
     }, server = FALSE)
     
@@ -7493,7 +7494,8 @@ mod_leader_server <- function(id, is_active = shiny::reactive(TRUE)) {
         out,
         lock            = "Player",
         remember        = FALSE,
-        default_visible = intersect(default_visible, names(out))
+        default_visible = intersect(default_visible, names(out)),
+        mode            = mode
       )
     }, server = FALSE)
     
@@ -7615,7 +7617,8 @@ mod_leader_server <- function(id, is_active = shiny::reactive(TRUE)) {
         disp_final,
         lock            = "Player",
         remember        = TRUE,
-        default_visible = intersect(default_visible, names(disp_final))
+        default_visible = intersect(default_visible, names(disp_final)),
+        mode            = mode
       )
     }, server = FALSE)
     
@@ -12186,7 +12189,8 @@ server <- function(input, output, session) {
         df_disp,
         lock            = "Pitch",
         remember        = FALSE,
-        default_visible = intersect(visible_set, names(df_disp))
+        default_visible = intersect(visible_set, names(df_disp)),
+        mode            = mode
       ))
     }
     
