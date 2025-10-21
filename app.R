@@ -826,7 +826,7 @@ datatable_with_colvis <- function(df, lock = character(0), remember = TRUE, defa
   )
   
   # Apply color coding for Process, Live, Results, and Bullpen tables by modifying the data directly
-  if ((identical(mode, "Process") || identical(mode, "Live") || identical(mode, "Results") || identical(mode, "Bullpen")) && "Pitch" %in% names(df)) {
+  if ((identical(mode, "Process") || identical(mode, "Live") || identical(mode, "Results") || identical(mode, "Bullpen")) && ("Pitch" %in% names(df) || "Player" %in% names(df))) {
     # Define columns to color code based on mode
     if (identical(mode, "Process")) {
       color_cols <- c("InZone%", "Comp%", "Strike%", "Swing%", "FPS%", "E+A%", "Ctrl+", "QP+", "Pitching+")
@@ -844,7 +844,10 @@ datatable_with_colvis <- function(df, lock = character(0), remember = TRUE, defa
       # Pre-calculate colors and apply as HTML styling
       for (i in seq_len(nrow(df))) {
         if (!is.na(df[[col]][i]) && df[[col]][i] != "") {
-          colors <- get_color_scale(df[[col]][i], col, df$Pitch[i])
+          # For leaderboard tables (Player column), use "All" pitch type
+          # For regular tables (Pitch column), use the specific pitch type
+          pitch_type <- if ("Player" %in% names(df)) "All" else df$Pitch[i]
+          colors <- get_color_scale(df[[col]][i], col, pitch_type)
           df[[col]][i] <- paste0(
             '<span style="background-color:', colors$bg, 
             '; color:', colors$text,
