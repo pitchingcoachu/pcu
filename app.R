@@ -825,8 +825,8 @@ datatable_with_colvis <- function(df, lock = character(0), remember = TRUE, defa
     )
   )
   
-  # Apply color coding for Process and Live tables by modifying the data directly
-  if ((identical(mode, "Process") || identical(mode, "Live")) && "Pitch" %in% names(df)) {
+  # Apply color coding for Process, Live, Results, and Bullpen tables by modifying the data directly
+  if ((identical(mode, "Process") || identical(mode, "Live") || identical(mode, "Results") || identical(mode, "Bullpen")) && "Pitch" %in% names(df)) {
     # Define columns to color code based on mode
     if (identical(mode, "Process")) {
       color_cols <- c("InZone%", "Comp%", "Strike%", "Swing%", "FPS%", "E+A%", "Ctrl+", "QP+", "Pitching+")
