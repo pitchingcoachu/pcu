@@ -11518,7 +11518,7 @@ server <- function(input, output, session) {
     # last-25 avg per type
     avg_mov <- df %>%
       dplyr::group_by(TaggedPitchType) %>%
-      dplyr::slice_tail(n = 25) %>%
+      dplyr::slice_tail(n = 1000) %>%
       dplyr::summarise(
         avg_HorzBreak        = mean(HorzBreak, na.rm = TRUE),
         avg_InducedVertBreak = mean(InducedVertBreak, na.rm = TRUE),
@@ -13403,7 +13403,7 @@ server <- function(input, output, session) {
     types <- ordered_types(); types_chr <- as.character(types)
     
     avg_mov <- df %>% dplyr::group_by(TaggedPitchType) %>%
-      dplyr::slice_tail(n = 25) %>%
+      dplyr::slice_tail(n = 1000) %>%
       dplyr::summarise(
         avg_HorzBreak        = mean(HorzBreak, na.rm = TRUE),
         avg_InducedVertBreak = mean(InducedVertBreak, na.rm = TRUE),
