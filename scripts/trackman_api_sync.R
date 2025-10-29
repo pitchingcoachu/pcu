@@ -128,14 +128,14 @@ request_trackman_token <- function(client_id, client_secret) {
   token
 }
 
-trackman_request <- function(token, url, method = "GET", body = NULL) {
+trackman_request <- function(token, url, method = "GET", body = NULL, retries = 2) {
   req <- request(url) |>
     req_method(method) |>
     req_headers(
       Authorization = paste("Bearer", token),
       accept = "text/plain"
     ) |>
-    req_timeout(30) |>
+    req_timeout(15) |>  # Reduced timeout to fail faster
     req_error(is_error = ~ FALSE)
 
   if (!is.null(body)) {
@@ -143,18 +143,44 @@ trackman_request <- function(token, url, method = "GET", body = NULL) {
     req <- req_headers(req, `Content-Type` = "application/json-patch+json")
   }
 
-  res <- req_perform(req)
-  if (resp_status(res) >= 400) {
-    detail <- tryCatch(resp_body_string(res), error = function(e) "")
-    # Don't abort on 404 errors - these are common when sessions don't exist
-    if (resp_status(res) == 404) {
-      warning(glue("TrackMan API call failed ({resp_status(res)}): {detail}"))
-      return(NULL)
-    } else {
-      cli_abort(glue("TrackMan API call failed ({resp_status(res)}): {detail}"))
+  # Retry logic for network issues
+  for (attempt in 1:(retries + 1)) {
+    res <- tryCatch({
+      req_perform(req)
+    }, error = function(e) {
+      if (grepl("timeout|timed out", e$message, ignore.case = TRUE)) {
+        message(glue("   Attempt {attempt}: Request timed out for {url}"))
+        if (attempt <= retries) {
+          message(glue("   Retrying in {attempt} seconds..."))
+          Sys.sleep(attempt)
+          return(NULL)  # Signal to retry
+        } else {
+          message("   All retry attempts exhausted")
+          stop(e)
+        }
+      } else {
+        stop(e)  # Re-throw non-timeout errors immediately
+      }
+    })
+    
+    # If we got a response, process it
+    if (!is.null(res)) {
+      if (resp_status(res) >= 400) {
+        detail <- tryCatch(resp_body_string(res), error = function(e) "")
+        # Don't abort on 404 errors - these are common when sessions don't exist
+        if (resp_status(res) == 404) {
+          warning(glue("TrackMan API call failed ({resp_status(res)}): {detail}"))
+          return(NULL)
+        } else {
+          cli_abort(glue("TrackMan API call failed ({resp_status(res)}): {detail}"))
+        }
+      }
+      return(res)
     }
   }
-  res
+  
+  # If we get here, all retries failed
+  cli_abort(glue("TrackMan API request failed after {retries + 1} attempts due to timeouts"))
 }
 
 discover_sessions <- function(token, date_from, date_to, env = c("practice", "game")) {
@@ -167,9 +193,40 @@ discover_sessions <- function(token, date_from, date_to, env = c("practice", "ga
     utcDateFrom = format_utc(date_from, end = FALSE),
     utcDateTo   = format_utc(date_to, end = TRUE)
   )
-  res <- trackman_request(token, url, method = "POST", body = body)
-  out <- resp_body_json(res, simplifyVector = TRUE)
-  tibble::as_tibble(out)
+  
+  message(glue("   Discovering sessions from {format_utc(date_from, end = FALSE)} to {format_utc(date_to, end = TRUE)}"))
+  
+  res <- tryCatch({
+    trackman_request(token, url, method = "POST", body = body)
+  }, error = function(e) {
+    if (grepl("timeout|timed out", e$message, ignore.case = TRUE)) {
+      warning(glue("Session discovery timed out - this may happen when no sessions exist for the date range"))
+      return(NULL)
+    } else {
+      stop(e)
+    }
+  })
+  
+  if (is.null(res)) {
+    message("   No sessions found or request timed out")
+    return(tibble())
+  }
+  
+  out <- tryCatch({
+    resp_body_json(res, simplifyVector = TRUE)
+  }, error = function(e) {
+    message("   Warning: Could not parse session discovery response")
+    return(list())
+  })
+  
+  if (is.null(out) || length(out) == 0) {
+    message("   No sessions returned from API")
+    return(tibble())
+  }
+  
+  result <- tibble::as_tibble(out)
+  message(glue("   Found {nrow(result)} session(s)"))
+  result
 }
 
 fetch_video_tokens <- function(token, session_id, env = c("practice", "game")) {
@@ -338,9 +395,21 @@ main <- function() {
   message(glue(">> Syncing TrackMan {tm_env} sessions from {dates$from} to {dates$to}"))
   token <- request_trackman_token(tm_client_id, tm_client_secret)
 
-  sessions <- discover_sessions(token, dates$from, dates$to, env = tm_env)
+  sessions <- tryCatch({
+    discover_sessions(token, dates$from, dates$to, env = tm_env)
+  }, error = function(e) {
+    if (grepl("timeout|timed out", e$message, ignore.case = TRUE)) {
+      message("Session discovery timed out - likely no sessions exist for this date range")
+      message("This commonly happens when no camera was used during practice sessions")
+      quit(status = 0)
+    } else {
+      cli_abort(glue("Failed to discover sessions: {e$message}"))
+    }
+  })
+  
   if (!nrow(sessions)) {
-    message("No sessions discovered in the requested window. Nothing to do.")
+    message("No sessions discovered in the requested window.")
+    message("This is normal when no camera/video was used during practice sessions.")
     quit(status = 0)
   }
 
