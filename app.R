@@ -216,6 +216,17 @@ blank_ea_except_all <- function(df) {
   df
 }
 
+blank_ahead_except_all <- function(df) {
+  if (!is.data.frame(df) || !("Ahead%" %in% names(df))) return(df)
+  pitch_cols <- intersect(c("Pitch","PitchType","TaggedPitchType"), names(df))
+  if (!length(pitch_cols)) return(df)
+  pitch_vals <- tolower(as.character(df[[pitch_cols[1]]]))
+  keep_all <- is.na(pitch_vals) | pitch_vals == "all"
+  df$`Ahead%` <- as.character(df$`Ahead%`)
+  df$`Ahead%`[!keep_all] <- ""
+  df
+}
+
 filter_batter_side <- function(df, side) {
   if (!is.data.frame(df) || !("BatterSide" %in% names(df))) return(df)
   if (is.null(side) || !nzchar(side) || identical(side, "All")) return(df)
@@ -787,6 +798,7 @@ wrap_pitch_counts <- function(x) {
 datatable_with_colvis <- function(df, lock = character(0), remember = TRUE, default_visible = names(df), mode = NULL) {
   df <- sanitize_for_dt(df)   # <- central fix
   df <- blank_ea_except_all(df)
+  df <- blank_ahead_except_all(df)
   default_visible <- intersect(default_visible, names(df))
   
   idx_lock   <- which(names(df) %in% lock) - 1
@@ -829,7 +841,7 @@ datatable_with_colvis <- function(df, lock = character(0), remember = TRUE, defa
   if ((identical(mode, "Process") || identical(mode, "Live") || identical(mode, "Results") || identical(mode, "Bullpen")) && ("Pitch" %in% names(df) || "Player" %in% names(df))) {
     # Define columns to color code based on mode
     if (identical(mode, "Process")) {
-      color_cols <- c("InZone%", "Comp%", "Strike%", "Swing%", "FPS%", "E+A%", "Ctrl+", "QP+", "Pitching+")
+      color_cols <- c("InZone%", "Comp%", "Strike%", "Swing%", "FPS%", "Ahead%", "E+A%", "Ctrl+", "QP+", "Pitching+")
     } else if (identical(mode, "Live")) {
       color_cols <- c("InZone%", "Strike%", "FPS%", "E+A%", "QP+", "Ctrl+", "Pitching+", "K%", "BB%", "Whiff%")
     } else if (identical(mode, "Results")) {
@@ -886,7 +898,7 @@ datatable_with_colvis <- function(df, lock = character(0), remember = TRUE, defa
 
 # Default column sets for the table-mode toggle
 stuff_cols    <- c("Pitch","#","Velo","Max","IVB","HB","rTilt","bTilt", "SpinEff","Spin","Height","Side","Ext","VAA","HAA","Stuff+")
-process_cols  <- c("Pitch","#","BF","InZone%","Comp%","Strike%","Swing%","FPS%","E+A%","Ctrl+","QP+","Pitching+")
+process_cols  <- c("Pitch","#","BF","InZone%","Comp%","Strike%","Swing%","FPS%","Ahead%","E+A%","Ctrl+","QP+","Pitching+")
 results_cols  <- c("Pitch","#","BF","K%","BB%","GB%","Barrel%","Whiff%","CSW%","EV","LA")
 results_cols_live <- c("Pitch","#","BF","K%","BB%","GB%","Whiff%","CSW%","EV","LA","Pitching+")
 bullpen_cols  <- c("Pitch","#","Velo","Max","IVB","HB","Spin","bTilt","Height","Side","Ext","InZone%","Comp%","Ctrl+","Stuff+")
@@ -904,6 +916,7 @@ all_table_cols <- unique(c(stuff_cols, process_cols, results_cols, results_cols_
 visible_set_for <- function(mode, custom = character(0), session_type = NULL) {
   if (identical(mode, "Process")) return(process_cols)
   if (identical(mode, "Results")) return(results_cols)
+  if (identical(mode, "Counting")) return(c("Pitch", "BF", "#", "P/BF", "BB", "K", "Whiffs", "Swings", "Called", "BIP", "Barrels"))
   if (identical(mode, "Bullpen")) return(bullpen_cols)
   if (identical(mode, "Live")) return(live_cols)
   if (identical(mode, "Usage")) return(usage_cols)
@@ -1240,6 +1253,143 @@ pctify <- function(x) {
     ))
   }
   
+  # ---- COUNTING MODE ----
+  if (identical(mode, "Counting")) {
+    swing_levels <- c("StrikeSwinging","FoulBallNotFieldable","FoulBallFieldable","InPlay","FoulBall")
+    
+    # Compute PA flags for terminal pitch identification
+    pf_flags <- compute_pa_flags(df)
+    df <- pf_flags$df
+    df_is_strikeout <- pf_flags$is_strikeout
+    df_is_walk <- pf_flags$is_walk
+    df_is_terminal <- pf_flags$is_terminal
+    
+    # Only terminal pitches for BF calculation
+    term_idx <- which(df_is_terminal)
+    term <- df[term_idx, , drop = FALSE]
+    term$is_strikeout <- df_is_strikeout[term_idx]
+    term$is_walk <- df_is_walk[term_idx]
+    
+    # Per-pitch-type calculations
+    per_type <- df %>%
+      dplyr::group_by(TaggedPitchType) %>%
+      dplyr::summarise(
+        Pitches = dplyr::n(),
+        Swings = sum(!is.na(PitchCall) & PitchCall %in% swing_levels, na.rm = TRUE),
+        Whiffs = sum(PitchCall == "StrikeSwinging", na.rm = TRUE),
+        Called = sum(PitchCall == "StrikeCalled", na.rm = TRUE),
+        BIP = sum(PitchCall == "InPlay", na.rm = TRUE),
+        .groups = "drop"
+      )
+    
+    # Terminal pitch statistics (for BF, K, BB)
+    term_stats <- term %>%
+      dplyr::group_by(TaggedPitchType) %>%
+      dplyr::summarise(
+        BF = dplyr::n(),
+        K = sum(is_strikeout, na.rm = TRUE),
+        BB = sum(is_walk, na.rm = TRUE),
+        .groups = "drop"
+      )
+    
+    # Barrel calculation for live/game sessions
+    barrel_stats <- df %>%
+      dplyr::filter(grepl("live|game|ab", tolower(SessionType)), PitchCall == "InPlay") %>%
+      dplyr::group_by(TaggedPitchType) %>%
+      dplyr::summarise(
+        Barrels = {
+          # Barrel definition: EV >= 98 mph and LA between 8-50 degrees
+          sum(!is.na(ExitSpeed) & !is.na(Angle) & 
+                ExitSpeed >= 98 & Angle >= 8 & Angle <= 50, na.rm = TRUE)
+        },
+        .groups = "drop"
+      )
+    
+    # Build the counting table
+    counting_pt <- per_type %>%
+      dplyr::left_join(term_stats, by = "TaggedPitchType") %>%
+      dplyr::left_join(barrel_stats, by = "TaggedPitchType") %>%
+      dplyr::mutate(
+        Pitches = dplyr::coalesce(Pitches, 0),
+        Swings = dplyr::coalesce(Swings, 0),
+        Whiffs = dplyr::coalesce(Whiffs, 0),
+        Called = dplyr::coalesce(Called, 0),
+        BIP = dplyr::coalesce(BIP, 0),
+        BF = dplyr::coalesce(BF, 0),
+        K = dplyr::coalesce(K, 0),
+        BB = dplyr::coalesce(BB, 0),
+        Barrels = dplyr::coalesce(Barrels, 0),
+        `P/BF` = safe_div(Pitches, BF)
+      ) %>%
+      dplyr::transmute(
+        Pitch = as.character(TaggedPitchType),
+        BF,
+        `#` = Pitches,
+        `P/BF`,
+        BB,
+        K,
+        Whiffs,
+        Swings,
+        Called,
+        BIP,
+        Barrels
+      )
+    
+    # Calculate ALL row
+    BF_all <- nrow(term)
+    Pitches_all <- nrow(df)
+    Swings_all <- sum(!is.na(df$PitchCall) & df$PitchCall %in% swing_levels, na.rm = TRUE)
+    Whiffs_all <- sum(df$PitchCall == "StrikeSwinging", na.rm = TRUE)
+    Called_all <- sum(df$PitchCall == "StrikeCalled", na.rm = TRUE)
+    BIP_all <- sum(df$PitchCall == "InPlay", na.rm = TRUE)
+    K_all <- sum(term$is_strikeout, na.rm = TRUE)
+    BB_all <- sum(term$is_walk, na.rm = TRUE)
+    
+    # Barrels for ALL (live/game sessions only)
+    live_df <- df %>% dplyr::filter(grepl("live|game|ab", tolower(SessionType)), PitchCall == "InPlay")
+    Barrels_all <- sum(!is.na(live_df$ExitSpeed) & !is.na(live_df$Angle) & 
+                         live_df$ExitSpeed >= 98 & live_df$Angle >= 8 & live_df$Angle <= 50, na.rm = TRUE)
+    
+    all_row <- tibble::tibble(
+      Pitch = "All",
+      BF = BF_all,
+      `#` = Pitches_all,
+      `P/BF` = safe_div(Pitches_all, BF_all),
+      BB = BB_all,
+      K = K_all,
+      Whiffs = Whiffs_all,
+      Swings = Swings_all,
+      Called = Called_all,
+      BIP = BIP_all,
+      Barrels = Barrels_all
+    )
+    
+    # Combine data
+    df_out <- dplyr::bind_rows(counting_pt, all_row)
+    
+    # Format P/BF as decimal (ensure character type for consistency)
+    df_out$`P/BF` <- ifelse(is.finite(df_out$`P/BF`), as.character(round(df_out$`P/BF`, 1)), "")
+    
+    # Convert to data frame
+    df_dt <- as.data.frame(df_out, stringsAsFactors = FALSE)
+    if ("#" %in% names(df_dt)) {
+      df_dt$`#` <- wrap_pitch_counts(df_dt$`#`)
+    }
+    
+    store_table_cache(df_dt, list(label_column = "Pitch"))
+    disp_dt <- df_dt
+    
+    visible_set <- c("Pitch", "BF", "#", "P/BF", "BB", "K", "Whiffs", "Swings", "Called", "BIP", "Barrels")
+    if (return_raw) return(disp_dt)
+    return(datatable_with_colvis(
+      disp_dt,
+      lock            = "Pitch",
+      remember        = FALSE,
+      default_visible = intersect(visible_set, names(disp_dt)),
+      mode            = mode
+    ))
+  }
+  
   # ---- NON-Results modes (match DP page) ----
   # QP+ per pitch type
   qp_by_type <- df %>%
@@ -1378,6 +1528,17 @@ pctify <- function(x) {
       KPercent      = ifelse(bf_count>0, paste0(round(100*k_count/bf_count,1), "%"), ""),
       BBPercent     = ifelse(bf_count>0, paste0(round(100*bb_count/bf_count,1), "%"), ""),
       FPSPercent    = ifelse(bf_count>0, paste0(round(100*fps_count/bf_count,1), "%"), ""),
+      AheadPercent  = { 
+        # Calculate strikes at 0-1 or 1-1 counts for this pitch type
+        ahead_strikes <- sum(
+          !is.na(df$Balls) & !is.na(df$Strikes) & 
+            ((df$Balls == 0 & df$Strikes == 1) | (df$Balls == 1 & df$Strikes == 1)) &
+            !is.na(df$PitchCall) & 
+            df$PitchCall %in% c("StrikeSwinging", "StrikeCalled", "FoulBall"),
+          na.rm = TRUE
+        )
+        if (bf_count > 0) paste0(round(100 * ahead_strikes / bf_count, 1), "%") else ""
+      },
       EAPercent     = ifelse(bf_count>0, paste0(round(100*ea_count/bf_count,1), "%"), ""),
       StrikePercent = ifelse(has_pc, paste0(round(100*strikes/nrow(df),1), "%"), ""),
       WhiffPercent  = ifelse(den>0, paste0(round(100*sw/den,1), "%"), ""),
@@ -1401,6 +1562,7 @@ pctify <- function(x) {
       `K%`      = KPercent,
       `BB%`     = BBPercent,
       `FPS%`    = FPSPercent,
+      `Ahead%`  = AheadPercent,
       `E+A%`    = EAPercent,
       `Strike%` = StrikePercent,
       `Whiff%`  = WhiffPercent,
@@ -1411,7 +1573,7 @@ pctify <- function(x) {
     dplyr::select(
       Pitch, `#`, Usage, BF,
       Velo, Max, IVB, HB, rTilt, bTilt, SpinEff, Spin, Height, Side, VAA, HAA, Ext,
-      `InZone%`, `Comp%`, `Strike%`, `FPS%`, `E+A%`, `K%`, `BB%`, `Whiff%`, EV, LA,
+      `InZone%`, `Comp%`, `Strike%`, `FPS%`, `Ahead%`, `E+A%`, `K%`, `BB%`, `Whiff%`, EV, LA,
       `Stuff+`, `Ctrl+`, `QP+`, `Pitching+`
     ) %>%
     dplyr::mutate(
@@ -1884,6 +2046,11 @@ get_process_thresholds <- function(column_name, pitch_type) {
   # FPS% thresholds (same for all pitch types including individual pitches)
   if (column_name == "FPS%") {
     return(list(poor = 55, avg = 60, great = 65))
+  }
+  
+  # Ahead% thresholds (only for All row)
+  if (column_name == "Ahead%" && pitch_type == "all") {
+    return(list(poor = 34, avg = 38, great = 42))
   }
   
   # E+A% thresholds (only for All row)
@@ -3618,6 +3785,18 @@ compute_process_results <- function(df, mode = "All") {
       la_vals <- la_vals[is.finite(la_vals)]
       if (length(la_vals) > 0) round(mean(la_vals), 1) else NA_real_
     } else NA_real_
+    
+    # Ahead% calculation: strikes at 0-1 or 1-1 counts divided by BF
+    ahead_pct <- if (pitch_lab == "All" && BF_all > 0) {
+      ahead_strikes <- sum(
+        !is.na(dfi$Balls) & !is.na(dfi$Strikes) & 
+          ((dfi$Balls == 0 & dfi$Strikes == 1) | (dfi$Balls == 1 & dfi$Strikes == 1)) &
+          !is.na(dfi$PitchCall) & 
+          dfi$PitchCall %in% c("StrikeSwinging", "StrikeCalled", "FoulBall"),
+        na.rm = TRUE
+      )
+      paste0(round(100 * ahead_strikes / BF_all, 1), "%")
+    } else ""
     
     tibble::tibble(
       PitchType = pitch_lab,
@@ -7278,7 +7457,7 @@ mod_leader_server <- function(id, is_active = shiny::reactive(TRUE)) {
       
       df2
     })
-
+    
     # Domain-aware filtered data (LSU-only)
     filtered_lb <- reactive({
       df <- filtered_lb_before_pitch_type()
@@ -7297,9 +7476,9 @@ mod_leader_server <- function(id, is_active = shiny::reactive(TRUE)) {
     output$lbButtons <- renderUI({
       sel <- isolate(input$lbMode); if (is.null(sel)) sel <- "Stuff"
       tagList(
-        radioButtons(ns("lbMode"), label = NULL,
-                     choices = c("Stuff","Process","Results","Bullpen","Live","Usage","Custom"),
-                     selected = sel, inline = TRUE),
+        selectInput(ns("lbMode"), label = "Table Mode:",
+                    choices = c("Stuff","Process","Results","Counting","Bullpen","Live","Usage","Custom"),
+                    selected = sel, width = "200px"),
         conditionalPanel(
           sprintf("input['%s']=='Custom'", ns("lbMode")),
           selectizeInput(ns("lbCustomCols"), label = NULL,
@@ -7353,6 +7532,14 @@ mod_leader_server <- function(id, is_active = shiny::reactive(TRUE)) {
       if (!length(rows)) {
         return(DT::datatable(data.frame(Message = "No data for selected filters"), options = list(dom = 't')))
       }
+      
+      # Ensure consistent column types before binding (especially P/BF)
+      rows <- lapply(rows, function(r) {
+        if ("P/BF" %in% names(r)) {
+          r$`P/BF` <- as.character(r$`P/BF`)
+        }
+        return(r)
+      })
       
       out_tbl <- dplyr::bind_rows(rows)
       
@@ -7863,11 +8050,11 @@ mod_comp_ui <- function(id, show_header = FALSE) {
             div(
               style = "margin: 8px 0;",
               tagList(
-                radioButtons(
-                  ns("cmpA_tableMode"), label = NULL,
-                  choices  = c("Stuff","Process","Results","Bullpen","Live","Usage","Custom"),
+                selectInput(
+                  ns("cmpA_tableMode"), label = "Table Mode:",
+                  choices  = c("Stuff","Process","Results","Counting","Bullpen","Live","Usage","Custom"),
                   selected = "Stuff",
-                  inline   = TRUE
+                  width = "200px"
                 ),
                 uiOutput(ns("cmpA_customPicker"))
               )
@@ -7883,11 +8070,11 @@ mod_comp_ui <- function(id, show_header = FALSE) {
             div(
               style = "margin: 8px 0;",
               tagList(
-                radioButtons(
-                  ns("cmpB_tableMode"), label = NULL,
-                  choices  = c("Stuff","Process","Results","Bullpen","Live","Usage","Custom"),
+                selectInput(
+                  ns("cmpB_tableMode"), label = "Table Mode:",
+                  choices  = c("Stuff","Process","Results","Counting","Bullpen","Live","Usage","Custom"),
                   selected = "Stuff",
-                  inline   = TRUE
+                  width = "200px"
                 ),
                 uiOutput(ns("cmpB_customPicker"))
               )
@@ -10903,11 +11090,11 @@ server <- function(input, output, session) {
     if (is.null(sel)) sel <- "Stuff"
     
     tagList(
-      radioButtons(
-        "summaryTableMode", label = NULL,
-        choices  = c("Stuff","Process","Results","Bullpen","Live","Usage","Custom"),
+      selectInput(
+        "summaryTableMode", label = "Table Mode:",
+        choices  = c("Stuff","Process","Results","Counting","Bullpen","Live","Usage","Custom"),
         selected = sel,
-        inline   = TRUE
+        width = "200px"
       ),
       # show the picker purely on the client; avoids re-render loops
       conditionalPanel(
@@ -10929,11 +11116,11 @@ server <- function(input, output, session) {
     if (is.null(sel)) sel <- "Stuff"
     
     tagList(
-      radioButtons(
-        "dpTableMode", label = NULL,
-        choices  = c("Stuff","Process","Results","Bullpen","Live","Usage","Custom"),
+      selectInput(
+        "dpTableMode", label = "Table Mode:",
+        choices  = c("Stuff","Process","Results","Counting","Bullpen","Live","Usage","Custom"),
         selected = sel,
-        inline   = TRUE
+        width = "200px"
       ),
       conditionalPanel(
         "input.dpTableMode=='Custom'",
@@ -11897,6 +12084,15 @@ server <- function(input, output, session) {
       ))
     }
     
+    # Get the mode from Summary page controls
+    mode <- if (!is.null(input$summaryTableMode)) input$summaryTableMode else "Stuff"
+    custom <- if (!is.null(input$summaryCustomCols)) input$summaryCustomCols else character(0)
+    
+    # Use .dp_like_table for Counting mode and other standardized modes
+    if (mode %in% c("Counting", "Stuff", "Process", "Bullpen", "Live", "Usage", "Custom")) {
+      return(.dp_like_table(df, mode, custom, table_id = "summaryTablePage", session = session))
+    }
+    
     # --- small helpers (match Hitting DP logic) ---
     nz_mean <- function(x) {
       x <- suppressWarnings(as.numeric(x))
@@ -12467,6 +12663,17 @@ server <- function(input, output, session) {
         data.frame(Message = "No data for selected filters"),
         options = list(dom = 't'), rownames = FALSE
       ))
+    }
+    
+    # prefer DP page controls; fall back to Summary page controls
+    mode <- if (!is.null(input$dpTableMode)) input$dpTableMode else
+      if (!is.null(input$summaryTableMode)) input$summaryTableMode else "Results"
+    custom <- if (!is.null(input$dpCustomCols)) input$dpCustomCols else
+      if (!is.null(input$summaryCustomCols)) input$summaryCustomCols else character(0)
+    
+    # Use .dp_like_table for Counting mode and other standardized modes
+    if (mode %in% c("Counting", "Stuff", "Process", "Bullpen", "Live", "Usage", "Custom")) {
+      return(.dp_like_table(df, mode, custom, table_id = "summaryTable", session = session))
     }
     
     # --- small helpers (match Hitting logic) ---
