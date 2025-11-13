@@ -29,6 +29,60 @@ if (!exists("TEAM_CODE", inherits = TRUE)) TEAM_CODE <- ""
 # VideoClip columns in CSV files contain full Cloudinary URLs
 cat("INFO: Videos are served from Cloudinary CDN for better performance\n")
 
+resolve_storage_path <- function(env_var, filename) {
+  override <- Sys.getenv(env_var, unset = NA_character_)
+  if (!is.na(override) && nzchar(override)) {
+    return(override)
+  }
+  user_dir <- tools::R_user_dir("pcu_dashboard", "data")
+  dir.create(user_dir, recursive = TRUE, showWarnings = FALSE)
+  dest <- file.path(user_dir, filename)
+  legacy <- file.path("data", filename)
+  if (!file.exists(dest) && file.exists(legacy)) {
+    tryCatch({
+      dir.create(dirname(dest), recursive = TRUE, showWarnings = FALSE)
+      file.copy(legacy, dest, overwrite = TRUE)
+    }, error = function(e) {
+      warning(sprintf("Could not migrate legacy %s to %s: %s", filename, dest, e$message))
+    })
+  }
+  dest
+}
+
+PLAYER_PLANS_STORAGE_PATH <- resolve_storage_path(
+  "PLAYER_PLANS_STORAGE_PATH",
+  "player_plans_store.rds"
+)
+PLAYER_COMPLETED_GOALS_STORAGE_PATH <- resolve_storage_path(
+  "PLAYER_COMPLETED_GOALS_STORAGE_PATH",
+  "player_completed_goals_store.rds"
+)
+
+read_rds_with_default <- function(path, default = list()) {
+  if (!file.exists(path)) return(default)
+  out <- tryCatch(readRDS(path), error = function(e) default)
+  if (is.list(out)) out else default
+}
+
+write_rds_atomically <- function(obj, path) {
+  dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+  tmp <- paste0(path, ".tmp-", Sys.getpid())
+  ok <- tryCatch({
+    saveRDS(obj, tmp)
+    moved <- file.rename(tmp, path)
+    if (!moved) {
+      moved <- file.copy(tmp, path, overwrite = TRUE)
+    }
+    if (!moved) stop("Could not move temp file into place")
+    TRUE
+  }, error = function(e) {
+    warning(sprintf("Failed to persist data to %s: %s", path, e$message))
+    FALSE
+  })
+  if (file.exists(tmp)) unlink(tmp)
+  invisible(ok)
+}
+
 
 # ---- Heatmap constants and functions for Player Plans ----
 HEAT_BINS <- 6
@@ -216,6 +270,25 @@ ensure_tagged_pitch_type <- function(df, fallback = "Unknown") {
   }
   df$TaggedPitchType[is.na(df$TaggedPitchType) | !nzchar(df$TaggedPitchType)] <- fallback
   df
+}
+
+format_player_display_name <- function(x) {
+  if (is.null(x)) return(x)
+  out <- as.character(x)
+  empty <- is.na(out) | !nzchar(out)
+  needs_swap <- grepl(",", out, fixed = TRUE) & !empty
+  if (any(needs_swap)) {
+    swapped <- vapply(strsplit(out[needs_swap], ",", fixed = TRUE), function(parts) {
+      parts <- trimws(parts)
+      if (length(parts) >= 2) {
+        paste(c(parts[-1], parts[1]), collapse = " ")
+      } else {
+        paste(parts, collapse = " ")
+      }
+    }, character(1))
+    out[needs_swap] <- swapped
+  }
+  trimws(out)
 }
 
 blank_ea_except_all <- function(df) {
@@ -9099,61 +9172,6 @@ player_plans_ui <- function() {
       )
     ),
     
-    # JavaScript for localStorage persistence
-    tags$script(HTML("
-      // Save player plans to localStorage
-      Shiny.addCustomMessageHandler('savePlayerPlans', function(plans) {
-        try {
-          localStorage.setItem('playerPlans', JSON.stringify(plans));
-          console.log('Saved player plans to localStorage');
-        } catch(e) {
-          console.error('Error saving to localStorage:', e);
-        }
-      });
-      
-      // Load player plans from localStorage
-      Shiny.addCustomMessageHandler('loadPlayerPlans', function(message) {
-        try {
-          var savedPlans = localStorage.getItem('playerPlans');
-          if (savedPlans) {
-            var plans = JSON.parse(savedPlans);
-            Shiny.setInputValue('loadedPlayerPlans', plans);
-            console.log('Loaded player plans from localStorage');
-          } else {
-            console.log('No saved plans found in localStorage');
-          }
-        } catch(e) {
-          console.error('Error loading from localStorage:', e);
-        }
-      });
-      
-      // Save completed goals to localStorage
-      Shiny.addCustomMessageHandler('saveCompletedGoals', function(goals) {
-        try {
-          localStorage.setItem('completedGoals', JSON.stringify(goals));
-          console.log('Saved completed goals to localStorage');
-        } catch(e) {
-          console.error('Error saving completed goals to localStorage:', e);
-        }
-      });
-      
-      // Load completed goals from localStorage
-      Shiny.addCustomMessageHandler('loadCompletedGoals', function(message) {
-        try {
-          var savedGoals = localStorage.getItem('completedGoals');
-          if (savedGoals) {
-            var goals = JSON.parse(savedGoals);
-            Shiny.setInputValue('loadedCompletedGoals', goals);
-            console.log('Loaded completed goals from localStorage');
-          } else {
-            console.log('No saved completed goals found in localStorage');
-          }
-        } catch(e) {
-          console.error('Error loading completed goals from localStorage:', e);
-        }
-      });
-    ")),
-    
     # Add custom CSS for the modal
     tags$style(HTML("
       .modal-dialog {
@@ -15549,42 +15567,22 @@ server <- function(input, output, session) {
   available_pitch_types <- names(all_colors)
   
   # Reactive values for persistent storage
-  player_plans_data <- reactiveValues()
-  completed_goals_data <- reactiveValues()
+  player_plans_data <- reactiveValues(
+    plans = read_rds_with_default(PLAYER_PLANS_STORAGE_PATH, default = list()),
+    current_player = NULL,
+    is_loading = FALSE
+  )
+  completed_goals_data <- reactiveValues(
+    goals = read_rds_with_default(PLAYER_COMPLETED_GOALS_STORAGE_PATH, default = list())
+  )
   
-  # Initialize player plans storage and load from localStorage
-  observe({
-    if (length(reactiveValuesToList(player_plans_data)) == 0) {
-      player_plans_data$plans <- list()
-      player_plans_data$current_player <- NULL
-      
-      # Load saved plans from localStorage
-      session$sendCustomMessage("loadPlayerPlans", list())
-    }
-    
-    if (length(reactiveValuesToList(completed_goals_data)) == 0) {
-      completed_goals_data$goals <- list()
-      
-      # Load saved completed goals from localStorage
-      session$sendCustomMessage("loadCompletedGoals", list())
-    }
-  })
+  persist_player_plans <- function() {
+    write_rds_atomically(player_plans_data$plans, PLAYER_PLANS_STORAGE_PATH)
+  }
   
-  # Receive loaded plans from localStorage
-  observeEvent(input$loadedPlayerPlans, {
-    if (!is.null(input$loadedPlayerPlans) && length(input$loadedPlayerPlans) > 0) {
-      player_plans_data$plans <- input$loadedPlayerPlans
-      cat("Loaded", length(input$loadedPlayerPlans), "saved plans from localStorage\n")
-    }
-  })
-  
-  # Receive loaded completed goals from localStorage
-  observeEvent(input$loadedCompletedGoals, {
-    if (!is.null(input$loadedCompletedGoals) && length(input$loadedCompletedGoals) > 0) {
-      completed_goals_data$goals <- input$loadedCompletedGoals
-      cat("Loaded", length(input$loadedCompletedGoals), "completed goals from localStorage\n")
-    }
-  })
+  persist_completed_goals <- function() {
+    write_rds_atomically(completed_goals_data$goals, PLAYER_COMPLETED_GOALS_STORAGE_PATH)
+  }
   
   # Helper function to get current player plan
   get_current_plan <- function(player) {
@@ -15661,8 +15659,11 @@ server <- function(input, output, session) {
       general_notes = input$pp_general_notes %||% ""
     )
     
-    player_plans_data$plans[[player]] <- plan
-    session$sendCustomMessage("savePlayerPlans", player_plans_data$plans)
+    existing <- player_plans_data$plans[[player]]
+    if (is.null(existing) || !identical(existing, plan)) {
+      player_plans_data$plans[[player]] <- plan
+      persist_player_plans()
+    }
   }
   
   # Observers for goal completion checkboxes
@@ -15714,12 +15715,10 @@ server <- function(input, output, session) {
     
     # Add to completed goals storage
     completed_goals_data$goals[[goal_id]] <- completed_goal
+    persist_completed_goals()
     
     # Clear the goal inputs after completion
     clear_goal_inputs(goal_num)
-    
-    # Save to localStorage
-    session$sendCustomMessage("saveCompletedGoals", completed_goals_data$goals)
     
     cat("Saved completed goal for player:", player, "goal:", goal_num, "\n")
   }
@@ -15757,8 +15756,11 @@ server <- function(input, output, session) {
       }
     }
     
+    player_labels <- format_player_display_name(players)
+    player_choices <- stats::setNames(players, player_labels)
+    
     updateSelectInput(session, "pp_player_select",
-                      choices = players,
+                      choices = player_choices,
                       selected = if(length(players) > 0) players[1] else NULL)
   })
   
@@ -15786,6 +15788,12 @@ server <- function(input, output, session) {
                            start = start_date,
                            end = max_date)
     }
+    
+    # Prevent auto-save from firing while we hydrate this player's state
+    player_plans_data$is_loading <- TRUE
+    on.exit({
+      player_plans_data$is_loading <- FALSE
+    }, add = TRUE)
     
     # Load player's saved plan
     plan <- get_current_plan(input$pp_player_select)
@@ -15833,6 +15841,11 @@ server <- function(input, output, session) {
       updateTextAreaInput(session, "pp_goal2_notes", value = plan$goal2_notes)
       updateTextAreaInput(session, "pp_goal3_notes", value = plan$goal3_notes)
       updateTextAreaInput(session, "pp_general_notes", value = plan$general_notes)
+      
+      # Reset completion checkboxes whenever we switch players
+      updateCheckboxInput(session, "pp_goal1_completed", value = FALSE)
+      updateCheckboxInput(session, "pp_goal2_completed", value = FALSE)
+      updateCheckboxInput(session, "pp_goal3_completed", value = FALSE)
     })
   }, ignoreInit = TRUE)
   
@@ -15840,6 +15853,7 @@ server <- function(input, output, session) {
   observe({
     req(input$pp_player_select)
     invalidateLater(1000, session)
+    if (isTRUE(player_plans_data$is_loading)) return()
     save_current_plan(input$pp_player_select)
   })
   
@@ -15861,7 +15875,7 @@ server <- function(input, output, session) {
   # Add basic output renders for Player Plans
   output$pp_player_name <- renderText({
     req(input$pp_player_select)
-    input$pp_player_select
+    format_player_display_name(input$pp_player_select)
   })
   
   output$pp_date_range_display <- renderText({
@@ -16002,77 +16016,120 @@ server <- function(input, output, session) {
     create_pp_goal_description(3)
   })
   
-  # Helper function to create goal descriptions  
-  create_pp_goal_description <- function(goal_num) {
-    goal_type <- input[[paste0("pp_goal", goal_num, "_type")]]
-    
-    if (is.null(goal_type) || goal_type == "") {
-      return("No goal selected")
+  build_goal_config <- function(goal_num = NULL, goal_data = NULL) {
+    if (!is.null(goal_data)) {
+      return(list(
+        type = goal_data$type %||% goal_data$goal_type %||% "",
+        stuff_category = goal_data$stuff_category %||% "",
+        velocity_pitch = goal_data$velocity_pitch %||% "All",
+        movement_pitch = goal_data$movement_pitch %||% "All",
+        movement_type = goal_data$movement_type %||% character(0),
+        execution_stat = goal_data$execution_stat %||% "",
+        execution_pitch = goal_data$execution_pitch %||% "All",
+        batter_hand = goal_data$batter_hand %||% "All",
+        chart_view = goal_data$chart_view %||% "Trend Chart",
+        target_direction = goal_data$target_direction %||% "",
+        target_value = goal_data$target_value %||% "",
+        notes = goal_data$notes %||% ""
+      ))
     }
     
-    # Get batter hand info
-    batter_hand <- input[[paste0("pp_goal", goal_num, "_batter_hand")]]
-    batter_text <- ""
-    if (!is.null(batter_hand) && batter_hand != "All") {
-      batter_text <- paste(" | vs", batter_hand)
+    if (is.null(goal_num)) {
+      return(list(
+        type = "", stuff_category = "", velocity_pitch = "All", movement_pitch = "All",
+        movement_type = character(0), execution_stat = "", execution_pitch = "All",
+        batter_hand = "All", chart_view = "Trend Chart", target_direction = "",
+        target_value = "", notes = ""
+      ))
     }
     
-    # Get target info
-    target_direction <- input[[paste0("pp_goal", goal_num, "_target_direction")]]
-    target_value <- input[[paste0("pp_goal", goal_num, "_target_value")]]
-    target_text <- ""
-    if (!is.null(target_direction) && !is.null(target_value) && 
-        target_direction != "" && target_value != "") {
-      target_text <- paste(" | Target:", target_direction, target_value)
+    list(
+      type = input[[paste0("pp_goal", goal_num, "_type")]] %||% "",
+      stuff_category = input[[paste0("pp_goal", goal_num, "_stuff_category")]] %||% "",
+      velocity_pitch = input[[paste0("pp_goal", goal_num, "_velocity_pitch")]] %||% "All",
+      movement_pitch = input[[paste0("pp_goal", goal_num, "_movement_pitch")]] %||% "All",
+      movement_type = input[[paste0("pp_goal", goal_num, "_movement_type")]] %||% character(0),
+      execution_stat = input[[paste0("pp_goal", goal_num, "_execution_stat")]] %||% "",
+      execution_pitch = input[[paste0("pp_goal", goal_num, "_execution_pitch")]] %||% "All",
+      batter_hand = input[[paste0("pp_goal", goal_num, "_batter_hand")]] %||% "All",
+      chart_view = input[[paste0("pp_goal", goal_num, "_chart_view")]] %||% "Trend Chart",
+      target_direction = input[[paste0("pp_goal", goal_num, "_target_direction")]] %||% "",
+      target_value = input[[paste0("pp_goal", goal_num, "_target_value")]] %||% "",
+      notes = input[[paste0("pp_goal", goal_num, "_notes")]] %||% ""
+    )
+  }
+  
+  describe_goal_from_config <- function(goal_config, trailing_text = "") {
+    goal_type <- goal_config$type %||% ""
+    if (!nzchar(goal_type)) return("No goal selected")
+    
+    batter_hand <- goal_config$batter_hand %||% "All"
+    batter_text <- if (!is.null(batter_hand) && batter_hand != "All") paste(" | vs", batter_hand) else ""
+    target_direction <- goal_config$target_direction %||% ""
+    target_value <- goal_config$target_value %||% ""
+    target_text <- if (nzchar(target_direction) && nzchar(target_value)) {
+      paste(" | Target:", target_direction, target_value)
+    } else ""
+    
+    append_context <- function(base_text) {
+      paste0(base_text, batter_text, target_text, trailing_text)
     }
     
     if (goal_type == "Stuff") {
-      category <- input[[paste0("pp_goal", goal_num, "_stuff_category")]]
-      if (is.null(category) || category == "") {
-        return(paste0("No category selected", batter_text, target_text))
-      }
+      category <- goal_config$stuff_category %||% ""
+      if (!nzchar(category)) return(append_context("No category selected"))
       
       if (category == "Velocity") {
-        pitch <- input[[paste0("pp_goal", goal_num, "_velocity_pitch")]]
-        if (is.null(pitch) || pitch == "") {
-          return(paste0("Velocity - No pitch type selected", batter_text, target_text))
-        }
-        return(paste0("Velocity - ", pitch, batter_text, target_text))
+        pitch <- goal_config$velocity_pitch %||% ""
+        if (!nzchar(pitch)) return(append_context("Velocity - No pitch type selected"))
+        return(append_context(paste0("Velocity - ", pitch)))
       }
       
       if (category == "Movement") {
-        pitch <- input[[paste0("pp_goal", goal_num, "_movement_pitch")]]
-        movement <- input[[paste0("pp_goal", goal_num, "_movement_type")]]
-        if (is.null(pitch) || pitch == "" || is.null(movement) || length(movement) == 0) {
-          return(paste0("Movement - Incomplete selection", batter_text, target_text))
+        pitch <- goal_config$movement_pitch %||% ""
+        movement <- goal_config$movement_type %||% character(0)
+        if (!nzchar(pitch) || !length(movement)) {
+          return(append_context("Movement - Incomplete selection"))
         }
-        return(paste0("Movement - ", pitch, " - ", paste(movement, collapse = ", "), batter_text, target_text))
+        return(append_context(paste0("Movement - ", pitch, " - ", paste(movement, collapse = ", "))))
       }
     }
     
     if (goal_type == "Execution") {
-      stat <- input[[paste0("pp_goal", goal_num, "_execution_stat")]]
-      pitch <- input[[paste0("pp_goal", goal_num, "_execution_pitch")]]
-      if (is.null(stat) || stat == "" || is.null(pitch) || length(pitch) == 0) {
-        return(paste0("Incomplete selection", batter_text, target_text))
-      }
-      return(paste0(stat, " - Pitch: ", paste(pitch, collapse = ", "), batter_text, target_text))
+      stat <- goal_config$execution_stat %||% ""
+      pitch <- goal_config$execution_pitch %||% ""
+      if (!nzchar(stat) || !length(pitch)) return(append_context("Incomplete selection"))
+      return(append_context(paste0(stat, " - Pitch: ", paste(pitch, collapse = ", "))))
     }
     
-    return(paste0("Invalid goal configuration", batter_text, target_text))
+    append_context("Invalid goal configuration")
+  }
+  
+  create_pp_goal_description <- function(goal_num) {
+    config <- build_goal_config(goal_num = goal_num)
+    describe_goal_from_config(config, trailing_text = goal_current_text(goal_num, config))
   }
   
   # ============== PLAYER PLANS CHART HELPER FUNCTIONS ==============
   
-  # Helper function to filter data for specific goal
-  filter_goal_data <- function(goal_num) {
-    req(input$pp_player_select, input$pp_date_range)
+  filter_data_for_goal_config <- function(player, date_range, session_type = "All", goal_config = NULL) {
+    if (is.null(player) || !nzchar(player) || is.null(date_range) || length(date_range) < 2) {
+      return(pitch_data_pitching[0, , drop = FALSE])
+    }
     
-    # Get the player's data using whitelist-filtered dataset
+    goal_config <- goal_config %||% list()
+    
+    sanitize_pitch_selection <- function(selection) {
+      if (is.null(selection)) return(character(0))
+      vals <- unique(as.character(selection))
+      vals <- vals[nzchar(vals) & vals != "All"]
+      vals
+    }
+    
     player_data <- pitch_data_pitching %>% 
-      dplyr::filter(Pitcher == input$pp_player_select,
-                    Date >= input$pp_date_range[1],
-                    Date <= input$pp_date_range[2]) %>%
+      dplyr::filter(Pitcher == player,
+                    Date >= date_range[1],
+                    Date <= date_range[2]) %>%
       dplyr::mutate(
         SessionType = dplyr::case_when(
           grepl("bull|prac", tolower(as.character(SessionType))) ~ "Bullpen",
@@ -16081,43 +16138,59 @@ server <- function(input, output, session) {
         )
       )
     
-    # Add pitch type filtering based on goal type and category
-    goal_type <- input[[paste0("pp_goal", goal_num, "_type")]]
+    if (!is.null(session_type) && session_type != "All") {
+      player_data <- player_data %>% dplyr::filter(SessionType == session_type)
+    }
     
-    if (!is.null(goal_type) && goal_type == "Stuff") {
-      category <- input[[paste0("pp_goal", goal_num, "_stuff_category")]]
-      
-      if (!is.null(category)) {
-        if (category == "Velocity") {
-          pitch <- input[[paste0("pp_goal", goal_num, "_velocity_pitch")]]
-          if (!is.null(pitch) && pitch != "" && pitch != "All") {
-            player_data <- player_data %>% dplyr::filter(TaggedPitchType == pitch)
-          }
-        } else if (category == "Movement") {
-          pitch <- input[[paste0("pp_goal", goal_num, "_movement_pitch")]]
-          if (!is.null(pitch) && pitch != "" && pitch != "All") {
-            player_data <- player_data %>% dplyr::filter(TaggedPitchType == pitch)
-          }
+    batter_hand <- goal_config$batter_hand %||% "All"
+    if (!is.null(batter_hand) && batter_hand != "All" && "BatterSide" %in% names(player_data)) {
+      player_data <- player_data %>% dplyr::filter(BatterSide == batter_hand)
+    }
+    
+    goal_type <- goal_config$type %||% ""
+    if (goal_type == "Stuff") {
+      category <- goal_config$stuff_category %||% ""
+      if (category == "Velocity") {
+        pitch <- sanitize_pitch_selection(goal_config$velocity_pitch)
+        if (length(pitch)) {
+          player_data <- player_data %>% dplyr::filter(TaggedPitchType %in% pitch)
+        }
+      } else if (category == "Movement") {
+        pitch <- sanitize_pitch_selection(goal_config$movement_pitch)
+        if (length(pitch)) {
+          player_data <- player_data %>% dplyr::filter(TaggedPitchType %in% pitch)
         }
       }
-    } else if (!is.null(goal_type) && goal_type == "Execution") {
-      pitch <- input[[paste0("pp_goal", goal_num, "_execution_pitch")]]
-      if (!is.null(pitch) && pitch != "" && pitch != "All") {
-        player_data <- player_data %>% dplyr::filter(TaggedPitchType == pitch)
+    } else if (goal_type == "Execution") {
+      pitch <- sanitize_pitch_selection(goal_config$execution_pitch)
+      if (length(pitch)) {
+        player_data <- player_data %>% dplyr::filter(TaggedPitchType %in% pitch)
       }
     }
     
-    return(player_data)
+    player_data
+  }
+  
+  filter_goal_data <- function(goal_num) {
+    req(input$pp_player_select, input$pp_date_range)
+    config <- build_goal_config(goal_num = goal_num)
+    filter_data_for_goal_config(
+      player = input$pp_player_select,
+      date_range = input$pp_date_range,
+      session_type = input$pp_session_type %||% "All",
+      goal_config = config
+    )
   }
   
   # Helper function to calculate metric for goal
-  calculate_metric <- function(df, goal_num) {
+  calculate_metric <- function(df, goal_num = NULL, goal_config = NULL) {
     if (is.null(df) || nrow(df) == 0) return(NULL)
     
-    goal_type <- input[[paste0("pp_goal", goal_num, "_type")]]
+    config <- goal_config %||% build_goal_config(goal_num = goal_num)
+    goal_type <- config$type
     
     if (goal_type == "Stuff") {
-      category <- input[[paste0("pp_goal", goal_num, "_stuff_category")]]
+      category <- config$stuff_category
       
       if (category == "Velocity") {
         return(df %>%
@@ -16129,7 +16202,7 @@ server <- function(input, output, session) {
                  dplyr::distinct(Date, SessionType, .keep_all = TRUE) %>%
                  dplyr::arrange(Date))
       } else if (category == "Movement") {
-        movement_types <- input[[paste0("pp_goal", goal_num, "_movement_type")]]
+        movement_types <- config$movement_type
         
         if ("IVB" %in% movement_types && "HB" %in% movement_types) {
           # Calculate combined movement metric (could be magnitude)
@@ -16164,7 +16237,7 @@ server <- function(input, output, session) {
         }
       }
     } else if (goal_type == "Execution") {
-      stat <- input[[paste0("pp_goal", goal_num, "_execution_stat")]]
+      stat <- config$execution_stat
       
       # Calculate different execution stats using the same logic as pitching suite
       if (stat == "FPS%") {
@@ -16322,6 +16395,64 @@ server <- function(input, output, session) {
     return(NULL)
   }
   
+  # Helper to format metric values with contextual units
+  format_goal_value <- function(goal_num = NULL, value, goal_config = NULL) {
+    if (!is.finite(value)) return(NULL)
+    config <- goal_config %||% build_goal_config(goal_num = goal_num)
+    goal_type <- config$type
+    if (is.null(goal_type) || goal_type == "") return(NULL)
+    
+    formatted_value <- round(value, 1)
+    
+    if (goal_type == "Stuff") {
+      category <- config$stuff_category
+      if (category == "Velocity") {
+        return(paste0(formatted_value, " mph"))
+      } else if (category == "Movement") {
+        return(paste0(formatted_value, " in"))
+      }
+    } else if (goal_type == "Execution") {
+      stat <- config$execution_stat %||% ""
+      if (!is.null(stat) && grepl("%$", stat)) {
+        return(paste0(formatted_value, "%"))
+      }
+      return(as.character(formatted_value))
+    }
+    return(as.character(formatted_value))
+  }
+  
+  # Compute average metric over selected date range for "Current" display
+  compute_goal_average_value <- function(player, goal_config, date_range, session_type) {
+    if (is.null(goal_config$type) || goal_config$type == "" ||
+        is.null(player) || !nzchar(player) ||
+        is.null(date_range) || length(date_range) < 2) {
+      return(NULL)
+    }
+    df <- filter_data_for_goal_config(player, date_range, session_type, goal_config)
+    if (is.null(df) || nrow(df) == 0) return(NULL)
+    metric_data <- calculate_metric(df, goal_config = goal_config)
+    if (is.null(metric_data) || !"value" %in% names(metric_data)) return(NULL)
+    vals <- metric_data$value
+    vals <- vals[is.finite(vals)]
+    if (!length(vals)) return(NULL)
+    mean(vals)
+  }
+  
+  format_goal_current_value <- function(goal_num, goal_config = NULL) {
+    config <- goal_config %||% build_goal_config(goal_num = goal_num)
+    player <- input$pp_player_select
+    date_range <- input$pp_date_range
+    session_type <- input$pp_session_type %||% "All"
+    avg_val <- compute_goal_average_value(player, config, date_range, session_type)
+    if (is.null(avg_val)) return(NULL)
+    format_goal_value(goal_num = goal_num, value = avg_val, goal_config = config)
+  }
+  
+  goal_current_text <- function(goal_num, goal_config = NULL) {
+    formatted <- format_goal_current_value(goal_num, goal_config)
+    if (is.null(formatted)) "" else paste(" | Current:", formatted)
+  }
+  
   # Helper function to create execution heatmaps
   create_execution_heatmap <- function(df, stat) {
     if (is.null(df) || nrow(df) == 0) {
@@ -16408,12 +16539,13 @@ server <- function(input, output, session) {
                theme_void())
     }
     
-    goal_type <- input[[paste0("pp_goal", goal_num, "_type")]]
+    goal_config <- build_goal_config(goal_num = goal_num)
+    goal_type <- goal_config$type
     
     # Check if this is an execution goal with heatmap view
     if (goal_type == "Execution") {
-      chart_view <- input[[paste0("pp_goal", goal_num, "_chart_view")]]
-      stat <- input[[paste0("pp_goal", goal_num, "_execution_stat")]]
+      chart_view <- goal_config$chart_view
+      stat <- goal_config$execution_stat
       
       if (!is.null(chart_view) && chart_view == "Heatmap" && !is.null(stat) && stat != "") {
         # Return heatmap for execution stats
@@ -16422,7 +16554,7 @@ server <- function(input, output, session) {
     }
     
     # For all other cases, create trend chart
-    metric_data <- calculate_metric(df, goal_num)
+    metric_data <- calculate_metric(df, goal_config = goal_config)
     if (is.null(metric_data) || nrow(metric_data) == 0) {
       return(ggplot() + 
                annotate("text", x = 0.5, y = 0.5, label = "No metric data available") +
@@ -16432,11 +16564,11 @@ server <- function(input, output, session) {
     # Determine y-axis label
     y_label <- "Value"
     if (goal_type == "Stuff") {
-      category <- input[[paste0("pp_goal", goal_num, "_stuff_category")]]
+      category <- goal_config$stuff_category
       if (category == "Velocity") {
         y_label <- "Velocity (mph)"
       } else if (category == "Movement") {
-        movement_types <- input[[paste0("pp_goal", goal_num, "_movement_type")]]
+        movement_types <- goal_config$movement_type
         if (length(movement_types) == 1) {
           y_label <- paste(movement_types[1], "(inches)")
         } else {
@@ -16444,13 +16576,13 @@ server <- function(input, output, session) {
         }
       }
     } else if (goal_type == "Execution") {
-      stat <- input[[paste0("pp_goal", goal_num, "_execution_stat")]]
+      stat <- goal_config$execution_stat
       y_label <- stat
     }
     
     # Get target information
-    target_direction <- input[[paste0("pp_goal", goal_num, "_target_direction")]]
-    target_value <- input[[paste0("pp_goal", goal_num, "_target_value")]]
+    target_direction <- goal_config$target_direction
+    target_value <- goal_config$target_value
     
     # Extract numeric value from target_value if it exists
     target_numeric <- NULL
@@ -16463,14 +16595,29 @@ server <- function(input, output, session) {
       }
     }
     
+    unique_dates <- metric_data %>%
+      dplyr::distinct(Date) %>%
+      dplyr::arrange(Date) %>%
+      dplyr::pull(Date)
+    
+    metric_data <- metric_data %>%
+      dplyr::mutate(
+        DateIndex = match(Date, unique_dates),
+        DateLabel = format(Date, "%m/%d")
+      ) %>%
+      dplyr::arrange(DateIndex)
+    
+    date_breaks <- seq_along(unique_dates)
+    date_labels <- format(unique_dates, "%m/%d")
+    
     # Create base plot with Live/Bullpen color coding
-    p <- ggplot(metric_data, aes(x = Date, y = value, color = SessionType)) +
+    p <- ggplot(metric_data, aes(x = DateIndex, y = value, color = SessionType)) +
       geom_point(size = 2) +
       geom_line(aes(group = SessionType), size = 1) +
       scale_color_manual(values = c("Bullpen" = "black", "Live" = "red")) +
-      scale_x_date(
-        breaks = unique(metric_data$Date),
-        labels = function(x) format(x, "%m/%d"),
+      scale_x_continuous(
+        breaks = date_breaks,
+        labels = date_labels,
         expand = expansion(mult = c(0.05, 0.05))
       )
     
@@ -16486,18 +16633,18 @@ server <- function(input, output, session) {
     # Determine chart title based on goal configuration
     chart_title <- "Goal Trend"
     if (goal_type == "Stuff") {
-      category <- input[[paste0("pp_goal", goal_num, "_stuff_category")]]
+      category <- goal_config$stuff_category
       if (!is.null(category) && category != "") {
         if (category == "Velocity") {
-          pitch <- input[[paste0("pp_goal", goal_num, "_velocity_pitch")]]
+          pitch <- goal_config$velocity_pitch
           if (!is.null(pitch) && pitch != "") {
             chart_title <- paste(pitch, "Velocity")
           } else {
             chart_title <- "Velocity"
           }
         } else if (category == "Movement") {
-          pitch <- input[[paste0("pp_goal", goal_num, "_movement_pitch")]]
-          movement <- input[[paste0("pp_goal", goal_num, "_movement_type")]]
+          pitch <- goal_config$movement_pitch
+          movement <- goal_config$movement_type
           if (!is.null(pitch) && pitch != "" && !is.null(movement) && length(movement) > 0) {
             chart_title <- paste(pitch, paste(movement, collapse = " & "))
           } else {
@@ -16506,7 +16653,7 @@ server <- function(input, output, session) {
         }
       }
     } else if (goal_type == "Execution") {
-      stat <- input[[paste0("pp_goal", goal_num, "_execution_stat")]]
+      stat <- goal_config$execution_stat
       if (!is.null(stat) && stat != "") {
         chart_title <- stat
       } else {
@@ -16532,21 +16679,25 @@ server <- function(input, output, session) {
   
   # Helper function to create data tables
   create_pp_goal_table <- function(goal_num) {
-    metric_data <- calculate_metric(filter_goal_data(goal_num), goal_num)
+    goal_config <- build_goal_config(goal_num = goal_num)
+    metric_data <- calculate_metric(
+      filter_goal_data(goal_num),
+      goal_config = goal_config
+    )
     if (is.null(metric_data) || nrow(metric_data) == 0) {
       return(data.frame(Date = character(0), Value = character(0)))
     }
     
     # Get the goal type and determine column name
-    goal_type <- input[[paste0("pp_goal", goal_num, "_type")]]
+    goal_type <- goal_config$type
     column_name <- "Value"
     
     if (goal_type == "Stuff") {
-      category <- input[[paste0("pp_goal", goal_num, "_stuff_category")]]
+      category <- goal_config$stuff_category
       if (category == "Velocity") {
         column_name <- "Velocity"
       } else if (category == "Movement") {
-        movement_types <- input[[paste0("pp_goal", goal_num, "_movement_type")]]
+        movement_types <- goal_config$movement_type
         if (length(movement_types) > 1) {
           column_name <- "Movement"
         } else if ("IVB" %in% movement_types) {
@@ -16556,7 +16707,7 @@ server <- function(input, output, session) {
         }
       }
     } else if (goal_type == "Execution") {
-      category <- input[[paste0("pp_goal", goal_num, "_execution_stat")]]
+      category <- goal_config$execution_stat
       if (category == "FPS%") {
         column_name <- "FPS%"
       } else if (category == "Strike%") {
@@ -16584,16 +16735,16 @@ server <- function(input, output, session) {
     
     # Create table with date and formatted value
     table_data <- metric_data %>%
+      dplyr::arrange(dplyr::desc(Date)) %>%
       dplyr::mutate(
         formatted_value = case_when(
           SessionType == "Bullpen" ~ paste0(value, " (B)"),
           SessionType == "Live" ~ paste0(value, " (L)"),
           TRUE ~ as.character(value)
         ),
-        Date = format(Date, "%m/%d")
+        DateLabel = format(Date, "%m/%d")
       ) %>%
-      dplyr::select(Date, formatted_value) %>%
-      dplyr::arrange(desc(as.Date(paste0("2025/", Date), format = "%Y/%m/%d")))
+      dplyr::select(Date = DateLabel, formatted_value)
     
     # Set column names
     colnames(table_data) <- c("Date", column_name)
@@ -16627,7 +16778,8 @@ server <- function(input, output, session) {
         info = FALSE,
         lengthChange = FALSE,
         ordering = FALSE,
-        dom = 't'
+        paging = TRUE,
+        dom = 'tp'
       ),
       rownames = FALSE
     )
@@ -16647,7 +16799,8 @@ server <- function(input, output, session) {
         info = FALSE,
         lengthChange = FALSE,
         ordering = FALSE,
-        dom = 't'
+        paging = TRUE,
+        dom = 'tp'
       ),
       rownames = FALSE
     )
@@ -16667,7 +16820,8 @@ server <- function(input, output, session) {
         info = FALSE,
         lengthChange = FALSE,
         ordering = FALSE,
-        dom = 't'
+        paging = TRUE,
+        dom = 'tp'
       ),
       rownames = FALSE
     )
@@ -16721,7 +16875,12 @@ server <- function(input, output, session) {
                   strong("Completed: "), format(as.Date(goal$date_completed), "%B %d, %Y")
               ),
               div(style = "margin-bottom: 10px;",
-                  strong("Description: "), create_pp_goal_description_from_data(goal$goal_data)
+                  strong("Description: "),
+                  create_pp_goal_description_from_data(
+                    goal = goal,
+                    date_range = input$pp_date_range,
+                    session_type = input$pp_session_type %||% "All"
+                  )
               ),
               if (!is.null(goal$goal_data$notes) && goal$goal_data$notes != "") {
                 div(style = "margin-bottom: 10px;",
@@ -16736,36 +16895,27 @@ server <- function(input, output, session) {
   })
   
   # Helper function to create goal descriptions from stored data
-  create_pp_goal_description_from_data <- function(goal_data) {
-    if (is.null(goal_data$type) || goal_data$type == "") {
-      return("No goal type selected")
+  create_pp_goal_description_from_data <- function(goal, date_range, session_type) {
+    if (is.null(goal) || is.null(goal$goal_data)) {
+      return("No goal data recorded")
     }
-    
-    if (goal_data$type == "Stuff") {
-      category <- goal_data$stuff_category %||% ""
-      if (category == "Velocity") {
-        pitch <- goal_data$velocity_pitch %||% ""
-        if (pitch == "") return("Velocity - No pitch type selected")
-        return(paste0("Velocity - ", pitch))
-      } else if (category == "Movement") {
-        pitch <- goal_data$movement_pitch %||% ""
-        movement <- goal_data$movement_type %||% character(0)
-        if (pitch == "" || length(movement) == 0) {
-          return("Movement - Incomplete selection")
-        }
-        return(paste0("Movement - ", pitch, " (", paste(movement, collapse = " & "), ")"))
+    goal_data <- goal$goal_data
+    session_type <- session_type %||% "All"
+    config <- build_goal_config(goal_data = goal_data)
+    trailing <- ""
+    avg_val <- compute_goal_average_value(goal$player, config, date_range, session_type)
+    final_label <- " | Final Avg (current range): "
+    if (!is.null(avg_val)) {
+      formatted <- format_goal_value(value = avg_val, goal_config = config)
+      if (!is.null(formatted)) {
+        trailing <- paste0(final_label, formatted)
       } else {
-        return("Stuff - No category selected")
+        trailing <- paste0(final_label, "N/A")
       }
-    } else if (goal_data$type == "Execution") {
-      stat <- goal_data$execution_stat %||% ""
-      pitch <- goal_data$execution_pitch %||% ""
-      if (stat == "") return("Execution - No stat selected")
-      if (pitch == "") return(paste0("Execution - ", stat, " (No pitch type selected)"))
-      return(paste0("Execution - ", stat, " (", pitch, ")"))
+    } else {
+      trailing <- paste0(final_label, "N/A")
     }
-    
-    return("Unknown goal type")
+    describe_goal_from_config(config, trailing_text = trailing)
   }
   
   # Helper function to clear goal inputs
