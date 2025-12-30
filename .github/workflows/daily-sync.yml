@@ -2,7 +2,7 @@ name: Daily PCU Data Sync and Deploy
 
 on:
   schedule:
-    - cron: '0 0 * * *'   # 8:00 PM ET (midnight UTC)
+    - cron: '0 0 * * *'   # 9:00 PM ET (midnight UTC)
   workflow_dispatch:  # Allow manual triggering
 
 jobs:
