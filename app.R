@@ -9491,7 +9491,7 @@ ui <- tagList(
         border-radius: 12px;
         overflow: hidden;
         box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
-        background: white;
+        background: transparent;
       }
 
       /* ===== PAGE CONTAINER ===== */
