@@ -9681,12 +9681,37 @@ $(document).off('click.pcuOpenMedia', 'a.open-media')
     body.theme-dark .plotly,
     body.theme-dark .html-widget {
       box-shadow: 0 2px 12px rgba(0,0,0,0.35);
+      background: transparent !important;
     }
     body.theme-dark .container-fluid {
       color: #e5e7eb;
     }
     body.theme-dark .selectize-control.single .selectize-input:after {
       border-color: #e5e7eb transparent transparent transparent;
+    }
+    body.theme-dark label,
+    body.theme-dark .control-label,
+    body.theme-dark .form-group,
+    body.theme-dark .form-group * {
+      color: #e5e7eb !important;
+    }
+    body.theme-dark table.dataTable tbody td,
+    body.theme-dark table.dataTable thead th {
+      color: #e5e7eb;
+      background: transparent;
+    }
+    body.theme-dark table.dataTable tbody tr {
+      background: transparent;
+    }
+    body.theme-dark svg text {
+      fill: #e5e7eb !important;
+    }
+    body.theme-dark svg line,
+    body.theme-dark svg path {
+      stroke: #e5e7eb !important;
+    }
+    body.theme-dark .selectize-input > input {
+      color: #e5e7eb !important;
     }
   ")),
   
