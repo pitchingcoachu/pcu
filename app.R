@@ -9688,7 +9688,6 @@ $(document).off('click.pcuOpenMedia', 'a.open-media')
       border-color: #e5e7eb transparent transparent transparent;
     }
   ")),
-  ")),
   
   navbarPage(
     title = tagList(
