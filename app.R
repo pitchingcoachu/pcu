@@ -9713,6 +9713,16 @@ $(document).off('click.pcuOpenMedia', 'a.open-media')
     body.theme-dark .selectize-input > input {
       color: #e5e7eb !important;
     }
+    body.theme-dark rect.panel.background,
+    body.theme-dark rect.plot.background,
+    body.theme-dark rect.background,
+    body.theme-dark g.panel.background rect,
+    body.theme-dark g.plot.background rect {
+      fill: transparent !important;
+      stroke: none !important;
+    }
+    body.theme-dark [fill='black'] { fill: #ffffff !important; }
+    body.theme-dark [stroke='black'] { stroke: #ffffff !important; }
   ")),
   
   navbarPage(
@@ -12341,7 +12351,8 @@ server <- function(input, output, session) {
           size = 3
         )
       } +
-      geom_hline(yintercept = 0) + geom_vline(xintercept = 0) +
+      geom_hline(yintercept = 0, color = axis_col) +
+      geom_vline(xintercept = 0, color = axis_col) +
       coord_cartesian(xlim = c(-25, 25), ylim = c(-25, 25)) +
       scale_color_manual(values = all_colors[types_chr], limits = types_chr, name = NULL) +
       scale_fill_manual(values  = all_colors[types_chr], limits = types_chr, name = NULL) +
@@ -14262,7 +14273,7 @@ server <- function(input, output, session) {
           size = 1
         )
       } +
-      geom_hline(yintercept = 0) + geom_vline(xintercept = 0) +
+      geom_hline(yintercept = 0, color = axis_col) + geom_vline(xintercept = 0, color = axis_col) +
       coord_cartesian(xlim = c(-25, 25), ylim = c(-25, 25)) +
       scale_color_manual(values = all_colors[types_chr], limits = types_chr, name = NULL) +
       scale_fill_manual(values  = all_colors[types_chr], limits = types_chr, name = NULL) +
