@@ -9571,6 +9571,21 @@ $(document).off('click.pcuOpenMedia', 'a.open-media')
                  class = "btn btn-note", title = "Add Note"),
     top = 8, right = 12, width = 50, fixed = TRUE, draggable = FALSE
   ),
+
+  tags$style(HTML("
+    /* Transparent backgrounds for summary plots/key */
+    #summary_heatZonePlot, #summary_legend {
+      background: transparent !important;
+    }
+    #summary_heatZonePlot svg, #summary_legend svg,
+    #summary_heatZonePlot canvas, #summary_legend canvas {
+      background: transparent !important;
+    }
+    /* Girafe outputs (location plot) */
+    #summary_zonePlot svg {
+      background: transparent !important;
+    }
+  ")),
   
   navbarPage(
     title = tagList(
@@ -12309,8 +12324,12 @@ server <- function(input, output, session) {
       coord_fixed(ratio = 1, xlim = c(-2, 2), ylim = c(0, 4.5)) +
       labs(title = "") +
       theme_void() +
-      theme(plot.title = element_text(face = "bold", hjust = 0.5))
-  })
+      theme(
+        plot.title = element_text(face = "bold", hjust = 0.5),
+        plot.background = element_rect(fill = NA, colour = NA),
+        panel.background = element_rect(fill = NA, colour = NA)
+      )
+  }, bg = "transparent")
   
   
   output$summary_legend <- renderPlot({
@@ -12319,8 +12338,13 @@ server <- function(input, output, session) {
     ggplot(leg_df,aes(x,y,color=TaggedPitchType))+geom_point(size=0,alpha=0)+
       scale_color_manual(values=all_colors[types],limits=types,name=NULL)+
       guides(color=guide_legend(nrow=1,byrow=TRUE,override.aes=list(size=4,alpha=1)))+
-      theme_void()+theme(legend.position="bottom",legend.text=element_text(size=12,face="bold"))
-  })
+      theme_void()+theme(
+        legend.position="bottom",
+        legend.text=element_text(size=12,face="bold"),
+        plot.background = element_rect(fill = NA, colour = NA),
+        panel.background = element_rect(fill = NA, colour = NA)
+      )
+  }, bg = "transparent")
   
   safe_pct <- function(num, den) {
     num <- suppressWarnings(as.numeric(num))
