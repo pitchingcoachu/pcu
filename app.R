@@ -96,11 +96,11 @@ ZONE_TOP <- 3.5
 
 # Frequency (keep multi-color)
 heat_pal_freq <- function(n = HEAT_BINS) colorRampPalette(
-  c("white","pink","red")
+  c("#00000000","pink","red")
 )(n)
 
 # All other heat maps → white→red only
-heat_pal_red  <- function(n = HEAT_BINS) colorRampPalette(c("white","pink","red"))(n)
+heat_pal_red  <- function(n = HEAT_BINS) colorRampPalette(c("#00000000","pink","red"))(n)
 
 # Draw heatmap function
 draw_heat <- function(grid, bins = HEAT_BINS, pal_fun = heat_pal_red,
@@ -139,8 +139,12 @@ draw_heat <- function(grid, bins = HEAT_BINS, pal_fun = heat_pal_red,
                  size = 3.8, shape = 21, fill = "red", color = "black", stroke = 0.5)
     } +
     coord_fixed(ratio = 1, xlim = c(-2, 2), ylim = c(0, 4.5)) +
-    theme_void() + theme(legend.position = "none",
-                         plot.title = element_text(face = "bold", hjust = 0.5)) +
+    theme_void() + theme(
+      legend.position = "none",
+      plot.title = element_text(face = "bold", hjust = 0.5),
+      panel.background = element_rect(fill = "transparent", colour = NA),
+      plot.background  = element_rect(fill = "transparent", colour = NA)
+    ) +
     labs(title = title)
 }
 
@@ -2338,7 +2342,10 @@ axis_theme <- theme(
   axis.text.x  = element_text(color="black", face="bold"),
   axis.text.y  = element_text(color="black", face="bold"),
   axis.title.x = element_text(color="black", face="bold"),
-  axis.title.y = element_text(color="black", face="bold")
+  axis.title.y = element_text(color="black", face="bold"),
+  panel.background = element_rect(fill = NA, colour = NA),
+  plot.background  = element_rect(fill = NA, colour = NA),
+  panel.grid.minor = element_blank()
 )
 
 # ----- Shared heatmap palette (identical to current heat maps) -----
@@ -2726,6 +2733,11 @@ all_colors <- c(
   Splitter   = "turquoise",
   Knuckleball= "darkblue"
 )
+colors_for_mode <- function(dark_on = FALSE) {
+  cols <- all_colors
+  if (isTRUE(dark_on) && "Fastball" %in% names(cols)) cols["Fastball"] <- "#ffffff"
+  cols
+}
 force_pitch_levels <- function(df) {
   if (!"TaggedPitchType" %in% names(df)) {
     # Create TaggedPitchType from fallback columns if missing
@@ -2742,7 +2754,12 @@ force_pitch_levels <- function(df) {
 }
 
 # Session colors for Trend when "All" is selected
-session_cols <- c(Live = "red", Bullpen = "black")
+  session_cols <- c(Live = "red", Bullpen = "black")
+  session_cols_for_mode <- function(dark_on = FALSE) {
+    cols <- session_cols
+    if (isTRUE(dark_on) && "Bullpen" %in% names(cols)) cols["Bullpen"] <- "#ffffff"
+    cols
+  }
 
 # Filters
 # ---- Filters: Zone & In-Zone ----
@@ -3606,7 +3623,8 @@ ALLOWED_PITCHERS <- c(
   "Skubal, Tarik",
   "Saucedo, Taylor",
   "Knight, Tyler",
-  "Zuber, Tyler"
+  "Zuber, Tyler",
+  "Quattrocchi, Anthony"
 )
 
 `%in_ci%` <- function(x, y) tolower(x) %in% tolower(y)
@@ -5343,7 +5361,7 @@ mod_hit_server <- function(id, is_active = shiny::reactive(TRUE)) {
       gg <- ggplot() +
         theme_void() +
         annotate("text", x = 0, y = 0, label = message, fontface = "bold")
-      ggiraph::girafe(ggobj = gg)
+      ggiraph::girafe(ggobj = gg, bg = "transparent")
     }
     
     output$result_key <- renderPlot({
@@ -5360,22 +5378,25 @@ mod_hit_server <- function(id, is_active = shiny::reactive(TRUE)) {
         scale_fill_identity() +
         coord_cartesian(xlim = c(0.5, length(hit_shape_map) + 0.5), ylim = c(-0.85, 0.35)) +
         theme_void()
-    })
+    }, bg = "transparent")
     
     output$pitch_type_key <- renderPlot({
       types <- ordered_types()
       if (!length(types)) return(NULL)
+      dark_on <- isTRUE(input$dark_mode)
+      axis_col <- if (dark_on) "#e5e7eb" else "#333333"
+      cols <- colors_for_mode(dark_on)
       leg_df <- data.frame(
         TaggedPitchType = factor(types, levels = types),
         x = seq_along(types)
       )
       ggplot(leg_df, aes(x = x, y = 0)) +
-        geom_point(aes(fill = TaggedPitchType), shape = 21, size = 6, color = "#333333", stroke = 1.1) +
-        geom_text(aes(label = TaggedPitchType, y = -0.48), size = 4, fontface = "bold", color = "#333333") +
-        scale_fill_manual(values = all_colors[types], limits = types, drop = FALSE, guide = "none") +
+        geom_point(aes(fill = TaggedPitchType), shape = 21, size = 6, color = axis_col, stroke = 1.1) +
+        geom_text(aes(label = TaggedPitchType, y = -0.48), size = 4, fontface = "bold", color = axis_col) +
+        scale_fill_manual(values = cols[types], limits = types, drop = FALSE, guide = "none") +
         coord_cartesian(xlim = c(0.5, length(types) + 0.5), ylim = c(-0.9, 0.35)) +
         theme_void()
-    })
+    }, bg = "transparent")
     
     make_location_plot <- function(df_subset) {
       if (!"Result" %in% names(df_subset)) {
@@ -5446,20 +5467,24 @@ mod_hit_server <- function(id, is_active = shiny::reactive(TRUE)) {
       df_known <- dplyr::filter(df_plot, !is.na(ResultDisplay))
       df_other <- dplyr::filter(df_plot, is.na(ResultDisplay))
       
+      dark_on <- isTRUE(input$dark_mode)
+      axis_col <- if (dark_on) "#e5e7eb" else "black"
+      cols <- colors_for_mode(dark_on)
+      
       p <- ggplot() +
-        geom_polygon(data = home, aes(x, y), inherit.aes = FALSE, fill = NA, color = "black") +
+        geom_polygon(data = home, aes(x, y), inherit.aes = FALSE, fill = NA, color = axis_col) +
         geom_rect(data = sz, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
-                  inherit.aes = FALSE, fill = NA, color = "black") +
+                  inherit.aes = FALSE, fill = NA, color = axis_col) +
         geom_rect(data = green_box,
                   aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
                   inherit.aes = FALSE,
                   fill = "#66c87a", alpha = 0.18, color = NA) +
         geom_segment(data = grid_vertical,
                      aes(x = x, xend = x, y = ymin, yend = ymax),
-                     inherit.aes = FALSE, color = "black", linewidth = 0.4) +
+                     inherit.aes = FALSE, color = axis_col, linewidth = 0.4) +
         geom_segment(data = grid_horizontal,
                      aes(x = xmin, xend = xmax, y = y, yend = y),
-                     inherit.aes = FALSE, color = "black", linewidth = 0.4) +
+                     inherit.aes = FALSE, color = axis_col, linewidth = 0.4) +
         ggiraph::geom_point_interactive(
           data = df_other,
           aes(PlateLocSide, PlateLocHeight,
@@ -5474,8 +5499,8 @@ mod_hit_server <- function(id, is_active = shiny::reactive(TRUE)) {
               tooltip = tooltip, data_id = rid),
           size = 5, alpha = 0.95, stroke = 0.8
         ) +
-        scale_color_manual(values = all_colors[types_chr], limits = types_chr, drop = FALSE, name = NULL) +
-        scale_fill_manual(values = all_colors[types_chr], limits = types_chr, drop = FALSE, name = NULL) +
+        scale_color_manual(values = cols[types_chr], limits = types_chr, drop = FALSE, name = NULL) +
+        scale_fill_manual(values = cols[types_chr], limits = types_chr, drop = FALSE, name = NULL) +
         scale_shape_manual(values = hit_shape_map, drop = TRUE) +
         coord_fixed(ratio = 1, xlim = c(-2, 2), ylim = c(0, 4.5)) +
         theme_void() +
@@ -5487,7 +5512,8 @@ mod_hit_server <- function(id, is_active = shiny::reactive(TRUE)) {
           ggiraph::opts_tooltip(use_fill = TRUE, use_stroke = TRUE, css = tooltip_css),
           ggiraph::opts_hover(css = "stroke-width:1.5px;"),
           ggiraph::opts_hover_inv(css = "opacity:0.15;")
-        )
+        ),
+        bg = "transparent"
       )
     }
     
@@ -5600,15 +5626,16 @@ mod_hit_server <- function(id, is_active = shiny::reactive(TRUE)) {
         coord_equal(xlim = c(-plot_limit, plot_limit), ylim = c(0, plot_limit), expand = FALSE) +
         theme_void()
       
-      ggiraph::girafe(
-        ggobj = p,
-        options = list(
-          ggiraph::opts_tooltip(use_fill = TRUE, use_stroke = TRUE, css = tooltip_css),
-          ggiraph::opts_hover(css = "stroke-width:1.5px;"),
-          ggiraph::opts_hover_inv(css = "opacity:0.15;")
-        )
-      )
-    })
+  ggiraph::girafe(
+    ggobj = p,
+    options = list(
+      ggiraph::opts_tooltip(use_fill = TRUE, use_stroke = TRUE, css = tooltip_css),
+      ggiraph::opts_hover(css = "stroke-width:1.5px;"),
+      ggiraph::opts_hover_inv(css = "opacity:0.15;")
+    ),
+    bg = "transparent"
+  )
+})
     
     
     summary_tables <- reactive({
@@ -6361,7 +6388,7 @@ mod_catch_server <- function(id, is_active = shiny::reactive(TRUE)) {
         labs(title = "Called-Strike%", x = NULL, y = NULL) +
         theme_void() +
         theme(plot.title = element_text(face = "bold", hjust = 0.5))
-    })
+    }, bg = "transparent")
     
     
     # ---- HeatMaps: Pitch (interactive scatter) ----
@@ -6731,17 +6758,27 @@ mod_camps_server <- function(id, is_active = shiny::reactive(TRUE)) {
       if (!nrow(df)) return(NULL)
       
       types <- intersect(names(all_colors), as.character(unique(df$TaggedPitchType)))
+      dark_on <- isTRUE(input$dark_mode)
+      axis_col <- if (dark_on) "#e5e7eb" else "black"
+      cols <- colors_for_mode(dark_on)
       p <- ggplot(df, aes(RelSide, RelHeight, color = TaggedPitchType)) +
         ggiraph::geom_point_interactive(aes(
           tooltip = paste0("Pitch: ", TaggedPitchType,
                            "\nVelo: ", ifelse(is.finite(RelSpeed), round(RelSpeed,1), NA), " mph",
                            "\nSpin: ", ifelse(is.finite(SpinRate), round(SpinRate,0), NA), " rpm")
         ), size = 2.8, alpha = 0.9) +
-        scale_color_manual(values = all_colors[types], limits = types, name = NULL) +
+        scale_color_manual(values = cols[types], limits = types, name = NULL) +
         labs(x = "Release Side (ft)", y = "Release Height (ft)") +
-        theme_minimal() + theme(legend.position = "none")
+        theme_minimal() + theme(
+          legend.position = "none",
+          axis.text = element_text(colour = axis_col),
+          axis.title = element_text(colour = axis_col),
+          panel.background = element_rect(fill = NA, colour = NA),
+          plot.background = element_rect(fill = NA, colour = NA),
+          panel.grid.major = element_line(color = scales::alpha(axis_col, 0.25))
+        )
       
-      ggiraph::girafe(ggobj = p)
+      ggiraph::girafe(ggobj = p, bg = "transparent")
     })
     
     # Movement Plot: HB vs IVB
@@ -6752,17 +6789,27 @@ mod_camps_server <- function(id, is_active = shiny::reactive(TRUE)) {
       if (!nrow(df)) return(NULL)
       
       types <- intersect(names(all_colors), as.character(unique(df$TaggedPitchType)))
+      dark_on <- isTRUE(input$dark_mode)
+      axis_col <- if (dark_on) "#e5e7eb" else "black"
+      cols <- colors_for_mode(dark_on)
       p <- ggplot(df, aes(HorzBreak, InducedVertBreak, color = TaggedPitchType)) +
         ggiraph::geom_point_interactive(aes(
           tooltip = paste0("Pitch: ", TaggedPitchType,
                            "\nHB: ", round(HorzBreak,1), " in",
                            "\nIVB: ", round(InducedVertBreak,1), " in")
         ), size = 2.8, alpha = 0.9) +
-        scale_color_manual(values = all_colors[types], limits = types, name = NULL) +
+        scale_color_manual(values = cols[types], limits = types, name = NULL) +
         labs(x = "Horizontal Break (in)", y = "Induced Vertical Break (in)") +
-        theme_minimal() + theme(legend.position = "none")
+        theme_minimal() + theme(
+          legend.position = "none",
+          axis.text = element_text(colour = axis_col),
+          axis.title = element_text(colour = axis_col),
+          panel.background = element_rect(fill = NA, colour = NA),
+          plot.background = element_rect(fill = NA, colour = NA),
+          panel.grid.major = element_line(color = scales::alpha(axis_col, 0.25))
+        )
       
-      ggiraph::girafe(ggobj = p)
+      ggiraph::girafe(ggobj = p, bg = "transparent")
     })
     
     # Location Plot: PlateLocSide vs PlateLocHeight + zone
@@ -6773,6 +6820,9 @@ mod_camps_server <- function(id, is_active = shiny::reactive(TRUE)) {
       if (!nrow(df)) return(NULL)
       
       types <- intersect(names(all_colors), as.character(unique(df$TaggedPitchType)))
+      dark_on <- isTRUE(input$dark_mode)
+      axis_col <- if (dark_on) "#e5e7eb" else "black"
+      cols <- colors_for_mode(dark_on)
       
       home <- data.frame(x=c(-0.75,0.75,0.75,0.00,-0.75),
                          y=c(1.05,1.05,1.15,1.25,1.15)-0.5)
@@ -6780,11 +6830,11 @@ mod_camps_server <- function(id, is_active = shiny::reactive(TRUE)) {
       sz <- data.frame(xmin = ZONE_LEFT, xmax = ZONE_RIGHT, ymin = ZONE_BOTTOM, ymax = ZONE_TOP)
       
       p <- ggplot() +
-        geom_polygon(data = home, aes(x, y), fill = NA, color = "black") +
+        geom_polygon(data = home, aes(x, y), fill = NA, color = axis_col) +
         geom_rect(data = cz, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
-                  fill = NA, color = "black", linetype = "dashed") +
+                  fill = NA, color = axis_col, linetype = "dashed") +
         geom_rect(data = sz, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
-                  fill = NA, color = "black") +
+                  fill = NA, color = axis_col) +
         ggiraph::geom_point_interactive(
           data = df,
           aes(PlateLocSide, PlateLocHeight, color = TaggedPitchType,
@@ -6793,11 +6843,15 @@ mod_camps_server <- function(id, is_active = shiny::reactive(TRUE)) {
                                "\nVelo: ", ifelse(is.finite(RelSpeed), round(RelSpeed,1), NA), " mph")),
           size = 3.0, alpha = 0.95, stroke = 0.7
         ) +
-        scale_color_manual(values = all_colors[types], limits = types, name = NULL) +
+        scale_color_manual(values = cols[types], limits = types, name = NULL) +
         coord_fixed(ratio = 1, xlim = c(-3, 3), ylim = c(0.5, 5)) +
-        theme_void() + theme(legend.position = "none")
+        theme_void() + theme(
+          legend.position = "none",
+          plot.background = element_rect(fill = NA, colour = NA),
+          panel.background = element_rect(fill = NA, colour = NA)
+        )
       
-      ggiraph::girafe(ggobj = p)
+      ggiraph::girafe(ggobj = p, bg = "transparent")
     })
     
     # ----- Pitching table (same options/defs as your Pitching Summary) -----
@@ -6998,7 +7052,7 @@ mod_camps_server <- function(id, is_active = shiny::reactive(TRUE)) {
           annotate("text", x = 0, y = 200, label = "No balls in play for current filters", size = 5) +
           coord_fixed(xlim = c(-380, 380), ylim = c(-30, 420)) +
           theme_void()
-        return(ggiraph::girafe(ggobj = p_empty))
+        return(ggiraph::girafe(ggobj = p_empty, bg = "transparent"))
       }
       
       bbe <- df[ok, , drop = FALSE]
@@ -7061,7 +7115,8 @@ mod_camps_server <- function(id, is_active = shiny::reactive(TRUE)) {
                                 css = "color:#fff !important;font-weight:600;padding:6px;border-radius:8px;text-shadow:0 1px 1px rgba(0,0,0,.35);"),
           ggiraph::opts_hover(css = "stroke-width:1.5px;"),
           ggiraph::opts_hover_inv(css = "opacity:0.15;")
-        )
+        ),
+        bg = "transparent"
       )
     })
     
@@ -8299,6 +8354,10 @@ mod_comp_server <- function(id, is_active = shiny::reactive(TRUE)) {
       if (!nrow(df)) return(NULL)
       df_i <- df %>% dplyr::mutate(tt = make_hover_tt(.), rid = dplyr::row_number())
       types_chr <- as.character(intersect(names(all_colors), unique(df_i$TaggedPitchType)))
+      dark_on <- isTRUE(input$dark_mode)
+      axis_col <- if (dark_on) "#e5e7eb" else "black"
+      grid_alpha <- if (dark_on) 0.15 else 0.35
+      cols <- colors_for_mode(dark_on)
       avg_mov <- df %>%
         dplyr::filter(is.finite(HorzBreak), is.finite(InducedVertBreak)) %>%
         dplyr::group_by(TaggedPitchType) %>%
@@ -8322,11 +8381,19 @@ mod_comp_server <- function(id, is_active = shiny::reactive(TRUE)) {
         ) +
         geom_hline(yintercept = 0) + geom_vline(xintercept = 0) +
         coord_cartesian(xlim = c(-25, 25), ylim = c(-25, 25)) +
-        scale_color_manual(values = all_colors[types_chr], limits = types_chr, name = NULL) +
-        scale_fill_manual(values  = all_colors[types_chr], limits = types_chr, name = NULL) +
+        scale_color_manual(values = cols[types_chr], limits = types_chr, name = NULL) +
+        scale_fill_manual(values  = cols[types_chr], limits = types_chr, name = NULL) +
         labs(x = "Horizontal Break (in)", y = "Induced Vertical Break (in)") +
         theme_minimal(base_size = 12) +
-        theme(legend.position = "none")
+        theme(
+          legend.position = "none",
+          axis.text = element_text(colour = axis_col),
+          axis.title = element_text(colour = axis_col),
+          panel.background = element_rect(fill = NA, colour = NA),
+          plot.background = element_rect(fill = NA, colour = NA),
+          panel.grid.major = element_line(color = scales::alpha(axis_col, grid_alpha)),
+          panel.grid.minor = element_blank()
+        )
       ggiraph::girafe(
         ggobj = p,
         options = list(
@@ -8334,7 +8401,8 @@ mod_comp_server <- function(id, is_active = shiny::reactive(TRUE)) {
           ggiraph::opts_tooltip(use_fill = TRUE, use_stroke = TRUE, css = tooltip_css),
           ggiraph::opts_hover(css = "stroke:black;stroke-width:1.5px;"),
           ggiraph::opts_hover_inv(css = "opacity:0.15;")
-        )
+        ),
+        bg = "transparent"
       )
     }
     output$cmpA_movement <- ggiraph::renderGirafe({ .movement_girafe(.filtered_panel("A")) })
@@ -8346,6 +8414,12 @@ mod_comp_server <- function(id, is_active = shiny::reactive(TRUE)) {
       types <- if (exists("ordered_types") && is.function(ordered_types)) {
         ot <- as.character(ordered_types()); ot[ot %in% unique(df$TaggedPitchType)]
       } else as.character(intersect(names(all_colors), unique(df$TaggedPitchType)))
+      dark_on <- isTRUE(input$dark_mode)
+      axis_col <- if (dark_on) "#e5e7eb" else "black"
+      grid_alpha <- if (dark_on) 0.15 else 0.35
+      cols <- colors_for_mode(dark_on)
+      mound_fill <- if (dark_on) "#2d2d2d" else "tan"
+      rubber_fill <- if (dark_on) NA else "white"
       rp_w <- 4; rp_h <- 0.83
       xs <- seq(-rp_w, rp_w, length.out = 100); ys <- rp_h * (1 - (xs / rp_w)^2)
       mound <- data.frame(x = c(xs, rev(xs)), y = c(ys, rep(0, length(xs))))
@@ -8358,16 +8432,23 @@ mod_comp_server <- function(id, is_active = shiny::reactive(TRUE)) {
         ) %>% dplyr::filter(TaggedPitchType %in% types)
       if (!nrow(avg)) return(ggplot() + theme_void())
       ggplot() +
-        geom_polygon(data = mound, aes(x, y), fill = "tan", color = "tan") +
-        annotate("rect", xmin = -0.5, xmax = 0.5, ymin = rp_h - 0.05, ymax = rp_h + 0.05, fill = "white") +
-        geom_vline(xintercept = 0, color = "black", size = 0.7) +
+        geom_polygon(data = mound, aes(x, y), fill = mound_fill, color = mound_fill) +
+        annotate("rect", xmin = -0.5, xmax = 0.5, ymin = rp_h - 0.05, ymax = rp_h + 0.05, fill = rubber_fill, color = axis_col) +
+        geom_vline(xintercept = 0, color = axis_col, size = 0.7) +
         geom_point(data = avg, aes(avg_RelSide, avg_RelHeight, color = TaggedPitchType), size = 4) +
-        scale_color_manual(values = all_colors[types], limits = types, name = NULL) +
-        theme_minimal() + axis_th + theme(legend.position = "none") +
+        scale_color_manual(values = cols[types], limits = types, name = NULL) +
+        theme_minimal() + axis_th + theme(
+          legend.position = "none",
+          axis.text = element_text(colour = axis_col),
+          axis.title = element_text(colour = axis_col),
+          panel.background = element_rect(fill = NA, colour = NA),
+          plot.background = element_rect(fill = NA, colour = NA),
+          panel.grid.major = element_line(color = scales::alpha(axis_col, grid_alpha))
+        ) +
         labs(x = NULL, y = NULL)
     }
-    output$cmpA_release <- renderPlot({ .release_plot(.filtered_panel("A")) })
-    output$cmpB_release <- renderPlot({ .release_plot(.filtered_panel("B")) })
+    output$cmpA_release <- renderPlot({ .release_plot(.filtered_panel("A")) }, bg = "transparent")
+    output$cmpB_release <- renderPlot({ .release_plot(.filtered_panel("B")) }, bg = "transparent")
     
     .kde_grid <- function(x, y, lims = c(-2, 2, 0, 4.5), n = 180) {
       ok <- is.finite(x) & is.finite(y)
@@ -8427,8 +8508,8 @@ mod_comp_server <- function(id, is_active = shiny::reactive(TRUE)) {
       }
       ggplot() + theme_void()
     }
-    output$cmpA_heat <- renderPlot({ .heat_plot(.filtered_panel("A"), input$cmpA_hmStat) })
-    output$cmpB_heat <- renderPlot({ .heat_plot(.filtered_panel("B"), input$cmpB_hmStat) })
+    output$cmpA_heat <- renderPlot({ .heat_plot(.filtered_panel("A"), input$cmpA_hmStat) }, bg = "transparent")
+    output$cmpB_heat <- renderPlot({ .heat_plot(.filtered_panel("B"), input$cmpB_hmStat) }, bg = "transparent")
     
     .pitch_girafe <- function(df, sel_results) {
       if (!nrow(df)) return(NULL)
@@ -9556,9 +9637,17 @@ $(document).off('click.pcuOpenMedia', 'a.open-media')
     top = 8, right = 12, width = 50, fixed = TRUE, draggable = FALSE
   ),
   absolutePanel(
-    style = "background:rgba(0,0,0,0.4); border-radius:12px; padding:6px 10px; color:#fff; z-index:2000;",
-    checkboxInput("dark_mode", "Dark mode", value = FALSE, width = "120px"),
-    top = 10, right = 80, width = 130, fixed = TRUE, draggable = FALSE
+    style = "background:rgba(0,0,0,0.4); border-radius:12px; padding:8px 12px; color:#fff; z-index:2000;",
+    tags$div(
+      class = "dark-toggle",
+      tags$label(
+        class = "switch-label",
+        tags$input(id = "dark_mode", type = "checkbox"),
+        tags$span(class = "switch-track", tags$span(class = "switch-thumb")),
+        tags$span(class = "switch-text", "Dark mode")
+      )
+    ),
+    top = 80, left = 12, width = 170, fixed = TRUE, draggable = FALSE
   ),
 
   tags$style(HTML("
@@ -9683,6 +9772,11 @@ $(document).off('click.pcuOpenMedia', 'a.open-media')
       box-shadow: 0 2px 12px rgba(0,0,0,0.35);
       background: transparent !important;
     }
+    body.theme-dark svg,
+    body.theme-dark canvas,
+    body.theme-dark .girafe_container svg {
+      background: transparent !important;
+    }
     body.theme-dark .container-fluid {
       color: #e5e7eb;
     }
@@ -9723,6 +9817,45 @@ $(document).off('click.pcuOpenMedia', 'a.open-media')
     }
     body.theme-dark [fill='black'] { fill: #ffffff !important; }
     body.theme-dark [stroke='black'] { stroke: #ffffff !important; }
+    body.theme-dark [fill='#000000'],
+    body.theme-dark [fill='#000'] { fill: #ffffff !important; }
+    body.theme-dark [stroke='#000000'],
+    body.theme-dark [stroke='#000'] { stroke: #ffffff !important; }
+    body.theme-dark svg rect[fill='white'],
+    body.theme-dark svg rect[fill='#FFFFFF'],
+    body.theme-dark svg rect[fill='#fff'] {
+      fill: transparent !important;
+      stroke: none !important;
+    }
+    /* Force heatmap plot outputs to stay transparent in dark mode */
+    body.theme-dark #heatmapsHeatPlot,
+    body.theme-dark #heatmapsHeatPlot canvas,
+    body.theme-dark #heatmapsHeatPlot img,
+    body.theme-dark #cmpA_heat,
+    body.theme-dark #cmpA_heat canvas,
+    body.theme-dark #cmpA_heat img,
+    body.theme-dark #cmpB_heat,
+    body.theme-dark #cmpB_heat canvas,
+    body.theme-dark #cmpB_heat img {
+      background: transparent !important;
+    }
+    /* Toggle switch styling */
+    .dark-toggle { display:flex; align-items:center; gap:10px; }
+    .dark-toggle .switch-label { display:flex; align-items:center; gap:10px; margin:0; cursor:pointer; }
+    .dark-toggle input#dark_mode { display:none; }
+    .dark-toggle .switch-track {
+      position: relative; width: 50px; height: 26px;
+      background: #4b5563; border-radius: 13px; transition: background 0.2s ease;
+      box-shadow: inset 0 0 4px rgba(0,0,0,0.35);
+    }
+    .dark-toggle .switch-thumb {
+      position: absolute; top: 3px; left: 3px; width: 20px; height: 20px;
+      background: #fff; border-radius: 50%; box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      transition: transform 0.2s ease;
+    }
+    .dark-toggle input#dark_mode:checked + .switch-track { background: #c1121f; }
+    .dark-toggle input#dark_mode:checked + .switch-track .switch-thumb { transform: translateX(24px); }
+    .dark-toggle .switch-text { font-weight:600; color:#e5e7eb; }
   ")),
   
   navbarPage(
@@ -11916,6 +12049,10 @@ server <- function(input, output, session) {
   })
   
   trend_plot <- function(df, val_expr, title, ylab, fun = mean) {
+    dark_on <- isTRUE(input$dark_mode)
+    axis_col <- if (dark_on) "#e5e7eb" else "black"
+    grid_alpha <- if (dark_on) 0.15 else 0.35
+    sess_cols <- session_cols_for_mode(dark_on)
     agg <- function(x) {
       x <- x[!is.na(x)]
       if (!length(x)) return(NA_real_)
@@ -11931,12 +12068,22 @@ server <- function(input, output, session) {
       
       ggplot(dat, aes(Date_f, value, group = SessionType, color = SessionType)) +
         geom_line(size = 1.2) + geom_point(size = 2) +
-        scale_color_manual(values = session_cols, breaks = c("Live", "Bullpen"), name = NULL) +
+        scale_color_manual(values = sess_cols, breaks = c("Live", "Bullpen"), name = NULL) +
         labs(title = title, x = NULL, y = ylab) +
         theme_minimal() + axis_theme +
-        theme(plot.title = element_text(face = "bold"),
-              axis.text.x = element_text(angle = 45, hjust = 1),
-              legend.position = "bottom")
+        theme(
+          plot.title = element_text(face = "bold", colour = axis_col),
+          axis.text.x = element_text(angle = 45, hjust = 1, colour = axis_col),
+          axis.text.y = element_text(colour = axis_col),
+          axis.title  = element_text(colour = axis_col),
+          legend.position = "bottom",
+          legend.text = element_text(colour = axis_col),
+          legend.background = element_rect(fill = NA, colour = NA),
+          legend.box.background = element_rect(fill = NA, colour = NA),
+          panel.background = element_rect(fill = NA, colour = NA),
+          plot.background = element_rect(fill = NA, colour = NA),
+          panel.grid.major = element_line(color = scales::alpha(axis_col, grid_alpha))
+        )
     } else {
       dat <- df %>%
         dplyr::group_by(Date) %>%
@@ -11946,12 +12093,20 @@ server <- function(input, output, session) {
       dat <- dplyr::mutate(dat, Date_f = factor(fmt_date(Date), levels = date_levels))
       
       ggplot(dat, aes(Date_f, value, group = 1)) +
-        geom_line(size = 1.2) + geom_point(size = 2) +
+        geom_line(size = 1.2, colour = axis_col) +
+        geom_point(size = 2, colour = axis_col) +
         labs(title = title, x = NULL, y = ylab) +
         theme_minimal() + axis_theme +
-        theme(plot.title = element_text(face = "bold"),
-              axis.text.x = element_text(angle = 45, hjust = 1),
-              legend.position = "none")
+        theme(
+          plot.title = element_text(face = "bold", colour = axis_col),
+          axis.text.x = element_text(angle = 45, hjust = 1, colour = axis_col),
+          axis.text.y = element_text(colour = axis_col),
+          axis.title  = element_text(colour = axis_col),
+          legend.position = "none",
+          panel.background = element_rect(fill = NA, colour = NA),
+          plot.background = element_rect(fill = NA, colour = NA),
+          panel.grid.major = element_line(color = scales::alpha(axis_col, grid_alpha))
+        )
     }
   }
   
@@ -12260,12 +12415,12 @@ server <- function(input, output, session) {
       options = list(
         ggiraph::opts_sizing(rescale = TRUE),
         ggiraph::opts_tooltip(use_fill = TRUE, use_stroke = TRUE, css = tooltip_css),
-      ggiraph::opts_hover(css = "stroke:black;stroke-width:1.5px;"),
-      ggiraph::opts_hover_inv(css = "opacity:0.15;")
-    ),
-    bg = "transparent"
-  )
-})
+        ggiraph::opts_hover(css = "stroke:black;stroke-width:1.5px;"),
+        ggiraph::opts_hover_inv(css = "opacity:0.15;")
+      ),
+      bg = "transparent"
+    )
+  })
   
   output$summary_movementPlot <- ggiraph::renderGirafe({
     df <- filtered_data(); if (!nrow(df)) return(NULL)
@@ -12275,6 +12430,7 @@ server <- function(input, output, session) {
     dark_on <- isTRUE(input$dark_mode)
     axis_col <- if (dark_on) "#e5e7eb" else "black"
     grid_alpha <- if (dark_on) 0.15 else 0.4
+    cols <- colors_for_mode(dark_on)
     
     # last-25 avg per type
     avg_mov <- df %>%
@@ -12354,8 +12510,8 @@ server <- function(input, output, session) {
       geom_hline(yintercept = 0, color = axis_col) +
       geom_vline(xintercept = 0, color = axis_col) +
       coord_cartesian(xlim = c(-25, 25), ylim = c(-25, 25)) +
-      scale_color_manual(values = all_colors[types_chr], limits = types_chr, name = NULL) +
-      scale_fill_manual(values  = all_colors[types_chr], limits = types_chr, name = NULL) +
+      scale_color_manual(values = cols[types_chr], limits = types_chr, name = NULL) +
+      scale_fill_manual(values  = cols[types_chr], limits = types_chr, name = NULL) +
       theme_minimal() + axis_theme +
       labs(x = NULL, y = NULL) +
       theme(
@@ -12503,13 +12659,16 @@ server <- function(input, output, session) {
   
   output$summary_legend <- renderPlot({
     types<-ordered_types(); if(!length(types)) return()
+    dark_on <- isTRUE(input$dark_mode)
+    axis_col <- if (dark_on) "#e5e7eb" else "black"
+    cols <- colors_for_mode(dark_on)
     leg_df<-data.frame(TaggedPitchType=factor(types,levels=types),x=1,y=1)
     ggplot(leg_df,aes(x,y,color=TaggedPitchType))+geom_point(size=0,alpha=0)+
-      scale_color_manual(values=all_colors[types],limits=types,name=NULL)+
+      scale_color_manual(values=cols[types],limits=types,name=NULL)+
       guides(color=guide_legend(nrow=1,byrow=TRUE,override.aes=list(size=4,alpha=1)))+
       theme_void()+theme(
         legend.position="bottom",
-        legend.text=element_text(size=12,face="bold"),
+        legend.text=element_text(size=12,face="bold",colour=axis_col),
         plot.background = element_rect(fill = NA, colour = NA),
         panel.background = element_rect(fill = NA, colour = NA),
         legend.title = element_blank(),
@@ -14096,6 +14255,11 @@ server <- function(input, output, session) {
     df <- filtered_data(); if (!nrow(df)) return(NULL)
     types <- ordered_types(); types_chr <- as.character(types)
     sess_lbl <- session_label_from(df)
+    dark_on <- isTRUE(input$dark_mode)
+    axis_col <- if (dark_on) "#e5e7eb" else "black"
+    cols <- colors_for_mode(dark_on)
+    mound_fill <- if (dark_on) "#2d2d2d" else "tan"
+    rubber_fill <- if (dark_on) NA else "white"
     
     # shared y-axis max so both panels align and show at least 6
     y_max <- max(6, suppressWarnings(max(df$RelHeight, na.rm = TRUE) + 0.2))
@@ -14127,18 +14291,24 @@ server <- function(input, output, session) {
       )
     
     p1 <- ggplot() +
-      geom_polygon(data = mound_df, aes(x, y), fill = "tan", color = "tan") +
-      annotate("rect", xmin = -0.5, xmax = 0.5, ymin = rp_h - 0.05, ymax = rp_h + 0.05, fill = "white") +
-      geom_vline(xintercept = 0, color = "black", size = 0.7) +
+      geom_polygon(data = mound_df, aes(x, y), fill = mound_fill, color = mound_fill) +
+      annotate("rect", xmin = -0.5, xmax = 0.5, ymin = rp_h - 0.05, ymax = rp_h + 0.05, fill = rubber_fill, color = axis_col) +
+      geom_vline(xintercept = 0, color = axis_col, size = 0.7) +
       ggiraph::geom_point_interactive(
         data = avg_rel,
         aes(x = avg_RelSide, y = avg_RelHeight,
             color = TaggedPitchType, tooltip = tt, data_id = TaggedPitchType),
         size = 4, show.legend = FALSE
       ) +
-      scale_color_manual(values = all_colors[types_chr], limits = types_chr, name = NULL) +
+      scale_color_manual(values = cols[types_chr], limits = types_chr, name = NULL) +
       scale_y_continuous(limits = c(0, y_max), breaks = seq(0, ceiling(y_max), by = 1)) +
-      theme_minimal() + axis_theme + labs(x = NULL, y = NULL)
+      theme_minimal() + axis_theme + labs(x = NULL, y = NULL) +
+      theme(
+        axis.text = element_text(colour = axis_col),
+        panel.background = element_rect(fill = NA, colour = NA),
+        plot.background = element_rect(fill = NA, colour = NA),
+        panel.grid.major = element_line(color = scales::alpha(axis_col, 0.25))
+      )
     
     # --- (B) Extension vs Height averages
     re_w <- 7; re_h <- 0.83
@@ -14167,9 +14337,9 @@ server <- function(input, output, session) {
       )
     
     p2 <- ggplot() +
-      geom_polygon(data = ext_bg, aes(x, y), fill = "tan", color = "tan") +
-      annotate("rect", xmin = 0, xmax = 0.2, ymin = re_h - 0.05, ymax = re_h + 0.05, fill = "white") +
-      geom_vline(xintercept = 0, color = "black", size = 0.7) +
+      geom_polygon(data = ext_bg, aes(x, y), fill = mound_fill, color = mound_fill) +
+      annotate("rect", xmin = 0, xmax = 0.2, ymin = re_h - 0.05, ymax = re_h + 0.05, fill = rubber_fill, color = axis_col) +
+      geom_vline(xintercept = 0, color = axis_col, size = 0.7) +
       ggiraph::geom_point_interactive(
         data = avg_ext,
         aes(x = avg_Extension, y = avg_RelHeight,
@@ -14178,14 +14348,23 @@ server <- function(input, output, session) {
       ) +
       scale_x_continuous(limits = c(0, 7.5), breaks = seq(1, 7.5, 1)) +
       scale_y_continuous(limits = c(0, y_max), breaks = seq(0, ceiling(y_max), by = 1)) +
-      scale_color_manual(values = all_colors[types_chr], limits = types_chr, name = NULL) +
-      theme_minimal() + axis_theme + labs(x = NULL, y = NULL)
+      scale_color_manual(values = cols[types_chr], limits = types_chr, name = NULL) +
+      theme_minimal() + axis_theme + labs(x = NULL, y = NULL) +
+      theme(
+        axis.text = element_text(colour = axis_col),
+        legend.text = element_text(colour = axis_col),
+        panel.background = element_rect(fill = NA, colour = NA),
+        plot.background = element_rect(fill = NA, colour = NA),
+        panel.grid.major = element_line(color = scales::alpha(axis_col, 0.25))
+      )
     
     # --- stack + single legend at bottom; enlarge legend text a bit
     p <- (p1 / p2) + patchwork::plot_layout(guides = "collect")
     p <- p & theme(
       legend.position = "bottom",
-      legend.text = element_text(size = 14)
+      legend.text = element_text(size = 14, colour = axis_col),
+      legend.background = element_rect(fill = NA, colour = NA),
+      legend.box.background = element_rect(fill = NA, colour = NA)
     )
     
     ggiraph::girafe(
@@ -14196,7 +14375,8 @@ server <- function(input, output, session) {
         ggiraph::opts_tooltip(use_fill = TRUE, use_stroke = TRUE, css = tooltip_css),
         ggiraph::opts_hover(css = "stroke:black;stroke-width:1.5px;"),
         ggiraph::opts_hover_inv(css = "opacity:0.15;")
-      )
+      ),
+      bg = "transparent"
     )
   })
   
@@ -14206,6 +14386,10 @@ server <- function(input, output, session) {
   output$movementPlot <- ggiraph::renderGirafe({
     df <- filtered_data(); if (!nrow(df)) return(NULL)
     types <- ordered_types(); types_chr <- as.character(types)
+    dark_on <- isTRUE(input$dark_mode)
+    axis_col <- if (dark_on) "#e5e7eb" else "black"
+    grid_alpha <- if (dark_on) 0.15 else 0.4
+    cols <- colors_for_mode(dark_on)
     
     avg_mov <- df %>% dplyr::group_by(TaggedPitchType) %>%
       dplyr::slice_tail(n = 1000) %>%
@@ -14275,10 +14459,21 @@ server <- function(input, output, session) {
       } +
       geom_hline(yintercept = 0, color = axis_col) + geom_vline(xintercept = 0, color = axis_col) +
       coord_cartesian(xlim = c(-25, 25), ylim = c(-25, 25)) +
-      scale_color_manual(values = all_colors[types_chr], limits = types_chr, name = NULL) +
-      scale_fill_manual(values  = all_colors[types_chr], limits = types_chr, name = NULL) +
+      scale_color_manual(values = cols[types_chr], limits = types_chr, name = NULL) +
+      scale_fill_manual(values  = cols[types_chr], limits = types_chr, name = NULL) +
       theme_minimal() + axis_theme +
-      theme(legend.position = "bottom", legend.text = element_text(size = 14))
+      theme(
+        legend.position = "bottom",
+        legend.text = element_text(size = 14, colour = axis_col),
+        legend.background = element_rect(fill = NA, colour = NA),
+        legend.box.background = element_rect(fill = NA, colour = NA),
+        axis.text.x = element_text(size = 15, face = "bold", colour = axis_col),
+        axis.text.y = element_text(size = 15, face = "bold", colour = axis_col),
+        panel.background = element_rect(fill = NA, colour = NA),
+        plot.background = element_rect(fill = NA, colour = NA),
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_line(color = scales::alpha(axis_col, grid_alpha))
+      )
     
     ggiraph::girafe(
       ggobj = p,
@@ -14290,7 +14485,8 @@ server <- function(input, output, session) {
         ggiraph::opts_hover(css = "stroke:black;stroke-width:1.5px;"),
         ggiraph::opts_hover_inv(css = "opacity:0.15;"),
         ggiraph::opts_selection(type = "single", only_shiny = TRUE)  # <-- added: single-select for reliable clicks
-      )
+      ),
+      bg = "transparent"
     )
   })
   
@@ -14441,6 +14637,10 @@ server <- function(input, output, session) {
   output$velocityPlot <- ggiraph::renderGirafe({
     df2 <- velocity_points_df(); if (!nrow(df2)) return(NULL)
     types <- ordered_types(); types_chr <- as.character(types)
+    dark_on <- isTRUE(input$dark_mode)
+    axis_col <- if (dark_on) "#e5e7eb" else "black"
+    grid_alpha <- if (dark_on) 0.15 else 0.35
+    cols <- colors_for_mode(dark_on)
     
     sp <- df2$RelSpeed
     if (all(is.na(sp))) {
@@ -14470,10 +14670,20 @@ server <- function(input, output, session) {
       ) +
       scale_x_continuous(limits = c(0, x_max), breaks = seq(0, x_max, 5)) +
       scale_y_continuous(limits = c(y_min, y_max), breaks = seq(y_min, y_max, 5)) +
-      scale_color_manual(values = all_colors[types_chr], limits = types_chr, name = NULL) +
-      scale_fill_manual(values  = all_colors[types_chr], limits = types_chr, name = NULL) +
+      scale_color_manual(values = cols[types_chr], limits = types_chr, name = NULL) +
+      scale_fill_manual(values  = cols[types_chr], limits = types_chr, name = NULL) +
       theme_minimal() + axis_theme +
-      theme(legend.position = "bottom", legend.text = element_text(size = 14)) +
+      theme(
+        legend.position = "bottom",
+        legend.text = element_text(size = 14, colour = axis_col),
+        legend.background = element_rect(fill = NA, colour = NA),
+        legend.box.background = element_rect(fill = NA, colour = NA),
+        axis.text = element_text(colour = axis_col),
+        axis.title = element_text(colour = axis_col),
+        panel.background = element_rect(fill = NA, colour = NA),
+        plot.background = element_rect(fill = NA, colour = NA),
+        panel.grid.major = element_line(color = scales::alpha(axis_col, grid_alpha))
+      ) +
       labs(title = "Velocity Chart (Game/Inning)", x = "Pitch Count", y = "Velocity (MPH)")
     
     # NEW: dashed vertical lines at inning boundaries (Live only)
@@ -14501,7 +14711,8 @@ server <- function(input, output, session) {
         ggiraph::opts_hover(css = "stroke:black;stroke-width:1.5px;"),
         ggiraph::opts_hover_inv(css = "opacity:0.15;"),
         ggiraph::opts_selection(type = "single", only_shiny = TRUE)
-      )
+      ),
+      bg = "transparent"
     )
   })
   
@@ -14519,6 +14730,10 @@ server <- function(input, output, session) {
     if (!nrow(dfG)) return(NULL)
     df_raw <- data_pkg$raw
     types <- ordered_types(); types_chr <- as.character(types)
+    dark_on <- isTRUE(input$dark_mode)
+    axis_col <- if (dark_on) "#e5e7eb" else "black"
+    grid_alpha <- if (dark_on) 0.15 else 0.35
+    cols <- colors_for_mode(dark_on)
     
     sp <- df_raw$RelSpeed
     if (all(is.na(sp))) { y_min <- 0; y_max <- 100 } else {
@@ -14537,13 +14752,20 @@ server <- function(input, output, session) {
       ) +
       scale_x_date(breaks = date_breaks, labels = function(d) format(d, "%m/%d/%y"), expand = c(0.02, 0.02)) +
       scale_y_continuous(limits = c(y_min, y_max), breaks = seq(y_min, y_max, 5)) +
-      scale_color_manual(values = all_colors[types_chr], limits = types_chr, name = NULL) +
-      scale_fill_manual(values  = all_colors[types_chr], limits = types_chr, name = NULL) +
+      scale_color_manual(values = cols[types_chr], limits = types_chr, name = NULL) +
+      scale_fill_manual(values  = cols[types_chr], limits = types_chr, name = NULL) +
       theme_minimal() + axis_theme +
       theme(
         legend.position = "bottom",
-        legend.text = element_text(size = 14),
-        axis.text.x = element_text(angle = 0, hjust = 0.5)
+        legend.text = element_text(size = 14, colour = axis_col),
+        legend.background = element_rect(fill = NA, colour = NA),
+        legend.box.background = element_rect(fill = NA, colour = NA),
+        axis.text.x = element_text(angle = 0, hjust = 0.5, colour = axis_col),
+        axis.text.y = element_text(colour = axis_col),
+        axis.title = element_text(colour = axis_col),
+        panel.background = element_rect(fill = NA, colour = NA),
+        plot.background = element_rect(fill = NA, colour = NA),
+        panel.grid.major = element_line(color = scales::alpha(axis_col, grid_alpha))
       ) +
       labs(title = "Average Velocity by Game",
            x = "", y = "Velocity (MPH)")
@@ -14555,7 +14777,8 @@ server <- function(input, output, session) {
         ggiraph::opts_hover(css = "stroke:black;stroke-width:1.5px;"),
         ggiraph::opts_hover_inv(css = "opacity:0.15;"),
         ggiraph::opts_selection(type = "single", only_shiny = TRUE)
-      )
+      ),
+      bg = "transparent"
     )
   })
   
@@ -14574,6 +14797,10 @@ server <- function(input, output, session) {
     if (!nrow(dfI)) return(NULL)
     df_live <- data_pkg$detail
     types <- ordered_types(); types_chr <- as.character(types)
+    dark_on <- isTRUE(input$dark_mode)
+    axis_col <- if (dark_on) "#e5e7eb" else "black"
+    grid_alpha <- if (dark_on) 0.15 else 0.35
+    cols <- colors_for_mode(dark_on)
     
     sp <- df_live$RelSpeed
     if (all(is.na(sp))) { y_min <- 0; y_max <- 100 } else {
@@ -14591,10 +14818,21 @@ server <- function(input, output, session) {
       ) +
       scale_x_continuous(breaks = seq_len(xmax)) +
       scale_y_continuous(limits = c(y_min, y_max), breaks = seq(y_min, y_max, 5)) +
-      scale_color_manual(values = all_colors[types_chr], limits = types_chr, name = NULL) +
-      scale_fill_manual(values  = all_colors[types_chr], limits = types_chr, name = NULL) +
+      scale_color_manual(values = cols[types_chr], limits = types_chr, name = NULL) +
+      scale_fill_manual(values  = cols[types_chr], limits = types_chr, name = NULL) +
       theme_minimal() + axis_theme +
-      theme(legend.position = "bottom", legend.text = element_text(size = 14)) +
+      theme(
+        legend.position = "bottom",
+        legend.text = element_text(size = 14, colour = axis_col),
+        legend.background = element_rect(fill = NA, colour = NA),
+        legend.box.background = element_rect(fill = NA, colour = NA),
+        axis.text.x = element_text(angle = 0, hjust = 0.5, colour = axis_col),
+        axis.text.y = element_text(colour = axis_col),
+        axis.title = element_text(colour = axis_col),
+        panel.background = element_rect(fill = NA, colour = NA),
+        plot.background = element_rect(fill = NA, colour = NA),
+        panel.grid.major = element_line(color = scales::alpha(axis_col, grid_alpha))
+      ) +
       labs(title = "Average Velocity by Inning ",
            x = "Inning of Appearance", y = "Velocity (MPH)")
     
@@ -14605,7 +14843,8 @@ server <- function(input, output, session) {
         ggiraph::opts_hover(css = "stroke:black;stroke-width:1.5px;"),
         ggiraph::opts_hover_inv(css = "opacity:0.15;"),
         ggiraph::opts_selection(type = "single", only_shiny = TRUE)
-      )
+      ),
+      bg = "transparent"
     )
   })
   
@@ -14743,7 +14982,7 @@ server <- function(input, output, session) {
         axis.line.x    = element_line(color = "black"),
         axis.line.y    = element_line(color = "black")
       )
-  })
+  }, bg = "transparent")
   
   # Heatmap Plot
   output$heatmapPlot <- renderPlot({
@@ -14772,12 +15011,15 @@ server <- function(input, output, session) {
                 fill=NA, color="black", inherit.aes=FALSE) +
       coord_fixed(ratio=1, xlim=c(-2,2), ylim=c(0,4.5)) +
       theme_void()
-  })
+  }, bg = "transparent")
   
   # Pitch Plot
   output$pitchPlot <- ggiraph::renderGirafe({
     df <- filtered_data(); if (!nrow(df)) return(NULL)
     types <- ordered_types(); types_chr <- as.character(types)
+    dark_on <- isTRUE(input$dark_mode)
+    axis_col <- if (dark_on) "#e5e7eb" else "black"
+    cols <- colors_for_mode(dark_on)
     
     sel <- sel_results()
     if (!identical(sel, result_levels)) {
@@ -14878,6 +15120,9 @@ server <- function(input, output, session) {
   output$locLegend <- renderUI({
     df <- filtered_data()
     types <- intersect(names(all_colors), as.character(unique(df$TaggedPitchType)))
+    dark_on <- isTRUE(input$dark_mode)
+    axis_col <- if (dark_on) "#e5e7eb" else "black"
+    cols <- colors_for_mode(dark_on)
     
     shape_key <- list(
       "Called Strike" = "\u25CF", # ●
@@ -14905,8 +15150,11 @@ server <- function(input, output, session) {
                tags$div(class="legend-title", "Pitch Result"),
                tags$ul(class="legend-list",
                        lapply(result_levels, function(lbl) {
-                         tags$li(tags$span(class="shape", if (is.null(shape_key[[lbl]])) "" else shape_key[[lbl]]),
-                                 tags$span(lbl))
+                         tags$li(
+                           style = paste0("color:", axis_col, ";"),
+                           tags$span(class="shape", if (is.null(shape_key[[lbl]])) "" else shape_key[[lbl]]),
+                           tags$span(lbl)
+                         )
                        })
                )
       ),
@@ -14915,9 +15163,12 @@ server <- function(input, output, session) {
                tags$div(class="legend-title", "Pitch Type"),
                tags$ul(class="legend-list",
                        lapply(types, function(tp) {
-                         col <- all_colors[[tp]]; if (is.null(col)) col <- "gray"
-                         tags$li(tags$span(class="dot", style = paste0("background:", col, ";")),
-                                 tags$span(tp))
+                         col <- cols[[tp]]; if (is.null(col)) col <- "gray"
+                         tags$li(
+                           style = paste0("color:", axis_col, ";"),
+                           tags$span(class="dot", style = paste0("background:", col, ";border:1px solid ", axis_col, ";")),
+                           tags$span(tp)
+                         )
                        })
                )
       )
@@ -15010,12 +15261,22 @@ server <- function(input, output, session) {
     }
     
     ggplot() + theme_void()
+  }, bg = "transparent")
+
+  # Override theme for HeatMaps plot container (force transparent background)
+  observe({
+    if (isTRUE(input$dark_mode)) {
+      session$sendCustomMessage("setHeatmapsBg", list(bg = "transparent"))
+    }
   })
   
   # ---------- PITCH (point chart; respects Pitch Results filter) ----------
   output$heatmapsPitchPlot <- ggiraph::renderGirafe({
     req(input$hmChartType == "Pitch")
     df <- filtered_data(); if (!nrow(df)) return(NULL)
+    dark_on <- isTRUE(input$dark_mode)
+    axis_col <- if (dark_on) "#e5e7eb" else "black"
+    cols <- colors_for_mode(dark_on)
     
     # Ensure Result for filtering + shapes
     if (!("Result" %in% names(df))) {
@@ -15044,11 +15305,11 @@ server <- function(input, output, session) {
     sz <- data.frame(xmin = ZONE_LEFT, xmax = ZONE_RIGHT, ymin = ZONE_BOTTOM, ymax = ZONE_TOP)
     
     p <- ggplot() +
-      geom_polygon(data = home, aes(x, y), fill = NA, color = "black") +
+      geom_polygon(data = home, aes(x, y), fill = NA, color = axis_col) +
       geom_rect(data = cz, aes(xmin=xmin,xmax=xmax,ymin=ymin,ymax=ymax),
-                fill = NA, color = "black", linetype = "dashed") +
+                fill = NA, color = axis_col, linetype = "dashed") +
       geom_rect(data = sz, aes(xmin=xmin,xmax=xmax,ymin=ymin,ymax=ymax),
-                fill = NA, color = "black") +
+                fill = NA, color = axis_col) +
       
       # visible points (unknown result as solid circle)
       ggiraph::geom_point_interactive(
@@ -15068,11 +15329,15 @@ server <- function(input, output, session) {
         size = 4.0, alpha = 0.95, stroke = 0.8
       ) +
       
-      scale_color_manual(values = all_colors[types_chr], limits = types_chr, name = NULL) +
-      scale_fill_manual(values  = all_colors[types_chr], limits = types_chr, name = NULL) +
+      scale_color_manual(values = cols[types_chr], limits = types_chr, name = NULL) +
+      scale_fill_manual(values  = cols[types_chr], limits = types_chr, name = NULL) +
       scale_shape_manual(values = shape_map, drop = TRUE, name = NULL) +
       coord_fixed(ratio = 1, xlim = c(-3, 3), ylim = c(0.5, 5)) +
-      theme_void() + theme(legend.position = "none") +
+      theme_void() + theme(
+        legend.position = "none",
+        plot.background = element_rect(fill = NA, colour = NA),
+        panel.background = element_rect(fill = NA, colour = NA)
+      ) +
       
       # invisible hover pad to guarantee correct tooltip fill even for hollow shapes
       ggiraph::geom_point_interactive(
@@ -15087,7 +15352,8 @@ server <- function(input, output, session) {
         ggiraph::opts_tooltip(use_fill = TRUE, use_stroke = TRUE, css = tooltip_css),
         ggiraph::opts_hover(css = "stroke-width:1.5px;"),
         ggiraph::opts_hover_inv(css = "opacity:0.15;")
-      )
+      ),
+      bg = "transparent"
     )
   })
   
@@ -15139,12 +15405,12 @@ server <- function(input, output, session) {
   output$veloTrendPlot <- renderPlot({
     df <- filtered_data(); req(nrow(df)>0)
     trend_plot(df, RelSpeed, "Average Velocity", "Velocity (MPH)", mean)
-  })
+  }, bg = "transparent")
   
   output$maxVeloTrendPlot <- renderPlot({
     df <- filtered_data(); req(nrow(df)>0)
     trend_plot(df, RelSpeed, "Max Velocity", "Velocity (MPH)", max)
-  })
+  }, bg = "transparent")
   
   output$inZoneTrendPlot <- renderPlot({
     df <- filtered_data(); req(nrow(df)>0)
@@ -15155,7 +15421,7 @@ server <- function(input, output, session) {
       "InZone %", "Percentage",
       function(x) mean(x, na.rm = TRUE) * 100
     )
-  })
+  }, bg = "transparent")
   
   output$compTrendPlot <- renderPlot({
     df <- filtered_data(); req(nrow(df)>0)
@@ -15166,32 +15432,32 @@ server <- function(input, output, session) {
       "Comp %", "Percentage",
       function(x) mean(x, na.rm = TRUE) * 100
     )
-  })
+  }, bg = "transparent")
   
   output$ivbTrendPlot <- renderPlot({
     df <- filtered_data(); req(nrow(df)>0)
     trend_plot(df, InducedVertBreak, "Induced Vertical Break", "IVB (in)", mean)
-  })
+  }, bg = "transparent")
   
   output$hbTrendPlot <- renderPlot({
     df <- filtered_data(); req(nrow(df)>0)
     trend_plot(df, HorzBreak, "Horizontal Break", "HB (in)", mean)
-  })
+  }, bg = "transparent")
   
   output$heightTrendPlot <- renderPlot({
     df <- filtered_data(); req(nrow(df)>0)
     trend_plot(df, RelHeight, "Release Height", "Height (ft)", mean)
-  })
+  }, bg = "transparent")
   
   output$extensionTrendPlot <- renderPlot({
     df <- filtered_data(); req(nrow(df)>0)
     trend_plot(df, Extension, "Extension (ft)", mean)
-  })
+  }, bg = "transparent")
   
   output$stuffTrendPlot <- renderPlot({
     df <- filtered_data(); req(nrow(df)>0)
     trend_plot(df, `Stuff+`, "Stuff+", "Stuff+", mean)
-  })
+  }, bg = "transparent")
   
   output$commandTrendPlot <- renderPlot({
     df <- filtered_data(); req(nrow(df)>0)
@@ -15207,7 +15473,7 @@ server <- function(input, output, session) {
                         )
                       ) * 100)
     trend_plot(df, ctrl_score, "Ctrl+", "Ctrl+", mean)
-  })
+  }, bg = "transparent")
   
   # ---------- QP+ (make it mirror Stuff+/Ctrl+ usage) ----------
   output$qpTrendPlot <- renderPlot({
@@ -15240,7 +15506,7 @@ server <- function(input, output, session) {
     
     validate(need(any(is.finite(df$qp_score)), "No QP+ values for current filters"))
     trend_plot(df, qp_score, "QP+", "QP+", mean)
-  })
+  }, bg = "transparent")
   
   # ---------- Pitching+ (prefer QP+; fallback to Ctrl+) ----------
   output$pitchingTrendPlot <- renderPlot({
@@ -15312,7 +15578,7 @@ server <- function(input, output, session) {
               axis.text.x = element_text(angle = 45, hjust = 1),
               legend.position = "none")
     }
-  })
+  }, bg = "transparent")
   
   # ---------- Helpers for Trend % plots ----------
   plot_trend_df <- function(dat, title, ylab) {
@@ -15370,7 +15636,7 @@ server <- function(input, output, session) {
         arrange(Date)
     }
     plot_trend_df(dat, "FPS%", "Percentage")
-  })
+  }, bg = "transparent")
   
   # ---------- E+A% (Live-only) ----------
   output$eaTrendPlot <- renderPlot({
@@ -15404,7 +15670,7 @@ server <- function(input, output, session) {
         arrange(Date)
     }
     plot_trend_df(dat, "E+A%", "Percentage")
-  })
+  }, bg = "transparent")
   
   # ---------- Whiff% ----------
   output$whiffTrendPlot <- renderPlot({
@@ -15431,7 +15697,7 @@ server <- function(input, output, session) {
         arrange(Date)
     }
     plot_trend_df(dat, "Whiff%", "Percentage")
-  })
+  }, bg = "transparent")
   
   output$cswTrendPlot <- renderPlot({
     df <- filtered_data(); req(nrow(df) > 0)
@@ -15459,7 +15725,7 @@ server <- function(input, output, session) {
     }
     
     plot_trend_df(dat, "CSW%", "Percentage")
-  })
+  }, bg = "transparent")
   
   
   # ---------- Strike% ----------
@@ -15488,7 +15754,7 @@ server <- function(input, output, session) {
         arrange(Date)
     }
     plot_trend_df(dat, "Strike%", "Percentage")
-  })
+  }, bg = "transparent")
   
   # ---------- K% (Live-only) ----------
   output$kTrendPlot <- renderPlot({
@@ -15515,7 +15781,7 @@ server <- function(input, output, session) {
         arrange(Date)
     }
     plot_trend_df(dat, "K%", "Percentage")
-  })
+  }, bg = "transparent")
   
   # ---------- BB% (Live-only) ----------
   output$bbTrendPlot <- renderPlot({
@@ -15542,7 +15808,7 @@ server <- function(input, output, session) {
         arrange(Date)
     }
     plot_trend_df(dat, "BB%", "Percentage")
-  })
+  }, bg = "transparent")
   
   # ============== CORRELATIONS SERVER LOGIC ==============
   
@@ -17242,15 +17508,15 @@ server <- function(input, output, session) {
   # Goal plot renders
   output$pp_goal1_plot <- renderPlot({
     create_pp_goal_plot(1)
-  })
+  }, bg = "transparent")
   
   output$pp_goal2_plot <- renderPlot({
     create_pp_goal_plot(2)
-  })
+  }, bg = "transparent")
   
   output$pp_goal3_plot <- renderPlot({
     create_pp_goal_plot(3)
-  })
+  }, bg = "transparent")
   
   # Goal table renders
   output$pp_goal1_table <- DT::renderDataTable({
@@ -17615,7 +17881,7 @@ server <- function(input, output, session) {
         axis.title = element_text(size = 12),
         axis.text = element_text(size = 10)
       )
-  })
+  }, bg = "transparent")
   
   # Data table
   output$corr_data_table <- DT::renderDataTable({
