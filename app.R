@@ -12500,7 +12500,10 @@ server <- function(input, output, session) {
         legend.position="bottom",
         legend.text=element_text(size=12,face="bold"),
         plot.background = element_rect(fill = NA, colour = NA),
-        panel.background = element_rect(fill = NA, colour = NA)
+        panel.background = element_rect(fill = NA, colour = NA),
+        legend.title = element_blank(),
+        legend.key = element_rect(fill = NA, colour = NA),
+        legend.text.align = 0
       )
   }, bg = "transparent")
   
