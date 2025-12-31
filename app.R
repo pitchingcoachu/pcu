@@ -12184,6 +12184,11 @@ server <- function(input, output, session) {
     df <- filtered_data(); if (!nrow(df)) return(NULL)
     types <- ordered_types(); types_chr <- as.character(types)
     sess_lbl <- session_label_from(df)
+    dark_on <- isTRUE(input$dark_mode)
+    line_col <- if (dark_on) "#e5e7eb" else "black"
+    mound_fill <- if (dark_on) "#2d2d2d" else "tan"
+    rubber_fill <- if (dark_on) NA else "white"
+    grid_alpha <- if (dark_on) 0.15 else 0.4
     
     # --- background geometry
     rp_w <- 4; rp_h <- 0.83
@@ -12216,9 +12221,9 @@ server <- function(input, output, session) {
     y_max <- max(6, suppressWarnings(max(df$RelHeight, na.rm = TRUE) + 0.2))
     
     p <- ggplot() +
-      geom_polygon(data = mound, aes(x, y), fill = "tan", color = "tan") +
-      annotate("rect", xmin = -0.5, xmax = 0.5, ymin = rp_h - 0.05, ymax = rp_h + 0.05, fill = "white") +
-      geom_vline(xintercept = 0, color = "black", size = 0.7) +
+      geom_polygon(data = mound, aes(x, y), fill = mound_fill, color = mound_fill) +
+      annotate("rect", xmin = -0.5, xmax = 0.5, ymin = rp_h - 0.05, ymax = rp_h + 0.05, fill = rubber_fill, color = line_col) +
+      geom_vline(xintercept = 0, color = line_col, size = 0.7) +
       ggiraph::geom_point_interactive(
         data = avg,
         aes(x = avg_RelSide, y = avg_RelHeight,
@@ -12231,8 +12236,12 @@ server <- function(input, output, session) {
       labs(x = NULL, y = NULL) +
       theme(
         legend.position = "none",
-        axis.text.x = element_text(size = 15, face = "bold"),
-        axis.text.y = element_text(size = 15, face = "bold")
+        axis.text.x = element_text(size = 15, face = "bold", colour = line_col),
+        axis.text.y = element_text(size = 15, face = "bold", colour = line_col),
+        panel.background = element_rect(fill = NA, colour = NA),
+        plot.background = element_rect(fill = NA, colour = NA),
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_line(color = scales::alpha(line_col, grid_alpha))
       )
     
     ggiraph::girafe(
@@ -12241,18 +12250,21 @@ server <- function(input, output, session) {
       options = list(
         ggiraph::opts_sizing(rescale = TRUE),
         ggiraph::opts_tooltip(use_fill = TRUE, use_stroke = TRUE, css = tooltip_css),
-        ggiraph::opts_hover(css = "stroke:black;stroke-width:1.5px;"),
-        ggiraph::opts_hover_inv(css = "opacity:0.15;")
-      ),
-      bg = "transparent"
-    )
-  })
+      ggiraph::opts_hover(css = "stroke:black;stroke-width:1.5px;"),
+      ggiraph::opts_hover_inv(css = "opacity:0.15;")
+    ),
+    bg = "transparent"
+  )
+})
   
   output$summary_movementPlot <- ggiraph::renderGirafe({
     df <- filtered_data(); if (!nrow(df)) return(NULL)
     types <- ordered_types()
     if (!length(types)) return(NULL)
     types_chr <- as.character(types)
+    dark_on <- isTRUE(input$dark_mode)
+    axis_col <- if (dark_on) "#e5e7eb" else "black"
+    grid_alpha <- if (dark_on) 0.15 else 0.4
     
     # last-25 avg per type
     avg_mov <- df %>%
@@ -12337,10 +12349,14 @@ server <- function(input, output, session) {
       labs(x = NULL, y = NULL) +
       theme(
         legend.position = "none",
-        axis.text.x     = element_text(size = 15, face = "bold"),
-        axis.text.y     = element_text(size = 15, face = "bold"),
+        axis.text.x     = element_text(size = 15, face = "bold", colour = axis_col),
+        axis.text.y     = element_text(size = 15, face = "bold", colour = axis_col),
         axis.title.x    = element_blank(),
-        axis.title.y    = element_blank()
+        axis.title.y    = element_blank(),
+        panel.background = element_rect(fill = NA, colour = NA),
+        plot.background = element_rect(fill = NA, colour = NA),
+        panel.grid.minor = element_blank(),
+        panel.grid.major = element_line(color = scales::alpha(axis_col, grid_alpha))
       )
     
     ggiraph::girafe(
@@ -12381,12 +12397,14 @@ server <- function(input, output, session) {
     df_known <- df_i %>% dplyr::filter(!is.na(Result))
     df_other <- df_i %>% dplyr::filter(is.na(Result))
     
+    dark_on <- isTRUE(input$dark_mode)
+    zone_col <- if (dark_on) "#e5e7eb" else "black"
     p <- ggplot() +
-      geom_polygon(data = home, aes(x, y), inherit.aes = FALSE, fill = NA, color = "black") +
+      geom_polygon(data = home, aes(x, y), inherit.aes = FALSE, fill = NA, color = zone_col) +
       geom_rect(data = cz, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
-                inherit.aes = FALSE, fill = NA, linetype = "dashed", color = "black") +
+                inherit.aes = FALSE, fill = NA, linetype = "dashed", color = zone_col) +
       geom_rect(data = sz, aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
-                inherit.aes = FALSE, fill = NA, color = "black") +
+                inherit.aes = FALSE, fill = NA, color = zone_col) +
       
       # filled circles for "no result" rows
       ggiraph::geom_point_interactive(
