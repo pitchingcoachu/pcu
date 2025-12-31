@@ -9181,6 +9181,7 @@ player_plans_ui <- function() {
 
 # New suite navbar around it
 ui <- tagList(
+  shinyjs::useShinyjs(),
   # --- Custom navbar colors & styling ---
   tags$head(
     tags$style(HTML("
