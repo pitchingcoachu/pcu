@@ -9554,6 +9554,11 @@ $(document).off('click.pcuOpenMedia', 'a.open-media')
                  class = "btn btn-note", title = "Add Note"),
     top = 8, right = 12, width = 50, fixed = TRUE, draggable = FALSE
   ),
+  absolutePanel(
+    style = "background:rgba(0,0,0,0.4); border-radius:12px; padding:6px 10px; color:#fff; z-index:2000;",
+    checkboxInput("dark_mode", "Dark mode", value = FALSE, width = "120px"),
+    top = 10, right = 80, width = 130, fixed = TRUE, draggable = FALSE
+  ),
 
   tags$style(HTML("
     /* Transparent backgrounds for summary plots/key */
@@ -9568,6 +9573,121 @@ $(document).off('click.pcuOpenMedia', 'a.open-media')
     #summary_zonePlot svg {
       background: transparent !important;
     }
+
+    /* ===== Dark mode overrides ===== */
+    body.theme-dark {
+      background: linear-gradient(135deg, #0b0d12 0%, #111827 100%);
+      color: #e5e7eb;
+    }
+    body.theme-dark .navbar-inverse {
+      background: linear-gradient(135deg, #0f172a 0%, #0b0f19 50%, #0a0d14 100%);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.6);
+    }
+    body.theme-dark .navbar-inverse .navbar-brand,
+    body.theme-dark .navbar-inverse .navbar-nav > li > a {
+      color: rgba(255,255,255,0.9) !important;
+    }
+    body.theme-dark .navbar-inverse .navbar-nav > li > a:hover,
+    body.theme-dark .navbar-inverse .navbar-nav > li > a:focus {
+      background: rgba(255,255,255,0.08);
+      color: #fff !important;
+    }
+    body.theme-dark .navbar-inverse .navbar-nav > .active > a,
+    body.theme-dark .navbar-inverse .navbar-nav > .active > a:hover,
+    body.theme-dark .navbar-inverse .navbar-nav > .active > a:focus {
+      background: linear-gradient(135deg, #c1121f 0%, #8b0d17 100%);
+      box-shadow: 0 4px 15px rgba(193,18,31,0.45);
+    }
+    body.theme-dark .well,
+    body.theme-dark .sidebar .well,
+    body.theme-dark .col-sm-3 .well,
+    body.theme-dark .col-sm-4 .well {
+      background: radial-gradient(circle at top left, #1f2937 0%, #0f172a 60%, #0b0f19 100%);
+      border-left: 4px solid #c1121f;
+      color: #e5e7eb;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.35);
+    }
+    body.theme-dark .form-control,
+    body.theme-dark .selectize-input {
+      background: #0f172a;
+      border-color: #1f2937;
+      color: #e5e7eb;
+    }
+    body.theme-dark .form-control:focus,
+    body.theme-dark .selectize-input.focus {
+      border-color: #c1121f;
+      box-shadow: 0 0 0 3px rgba(193,18,31,0.25);
+    }
+    body.theme-dark .selectize-dropdown {
+      background: #0f172a;
+      border-color: #1f2937;
+    }
+    body.theme-dark .selectize-dropdown-content .option {
+      color: #e5e7eb;
+    }
+    body.theme-dark .selectize-dropdown-content .option:hover,
+    body.theme-dark .selectize-dropdown-content .option.active {
+      background: linear-gradient(135deg, #c1121f 0%, #8b0d17 100%);
+      color: #fff;
+    }
+    body.theme-dark .nav-tabs {
+      border-bottom-color: #1f2937;
+    }
+    body.theme-dark .nav-tabs > li > a {
+      color: #cbd5e1;
+      background: transparent;
+    }
+    body.theme-dark .nav-tabs > li > a:hover {
+      background: rgba(193,18,31,0.12);
+      color: #fff;
+    }
+    body.theme-dark .nav-tabs > li.active > a,
+    body.theme-dark .nav-tabs > li.active > a:hover,
+    body.theme-dark .nav-tabs > li.active > a:focus {
+      background: linear-gradient(135deg, #c1121f 0%, #8b0d17 100%);
+      color: #fff;
+      box-shadow: 0 -2px 10px rgba(193,18,31,0.4);
+    }
+    body.theme-dark .btn-default {
+      background: #0f172a;
+      color: #e5e7eb;
+      border: 2px solid #1f2937;
+    }
+    body.theme-dark .btn-default:hover {
+      background: #111827;
+      border-color: #c1121f;
+      color: #fff;
+    }
+    body.theme-dark .dataTables_wrapper {
+      background: #0b1220;
+      color: #e5e7eb;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+    }
+    body.theme-dark table.dataTable tbody tr:hover {
+      background: rgba(193,18,31,0.12);
+    }
+    body.theme-dark .panel {
+      background: #0f172a;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+      color: #e5e7eb;
+    }
+    body.theme-dark .panel-default > .panel-heading {
+      background: linear-gradient(135deg, #111827 0%, #0b1220 100%);
+      border: none;
+      color: #e5e7eb;
+    }
+    body.theme-dark .shiny-plot-output,
+    body.theme-dark .plotly,
+    body.theme-dark .html-widget {
+      box-shadow: 0 2px 12px rgba(0,0,0,0.35);
+    }
+    body.theme-dark .container-fluid {
+      color: #e5e7eb;
+    }
+    body.theme-dark .selectize-control.single .selectize-input:after {
+      border-color: #e5e7eb transparent transparent transparent;
+    }
+  ")),
   ")),
   
   navbarPage(
@@ -9610,6 +9730,15 @@ server <- function(input, output, session) {
     else if (grepl("\\.mov(\\?.*)?$", nm)) "video/quicktime"
     else "video"
   }
+
+  # Theme toggle (light/dark)
+  observeEvent(input$dark_mode, {
+    if (isTRUE(input$dark_mode)) {
+      shinyjs::addClass(selector = "body", class = "theme-dark")
+    } else {
+      shinyjs::removeClass(selector = "body", class = "theme-dark")
+    }
+  }, ignoreInit = TRUE)
   
   
   # Map a clip name to a served URL, respecting subfolders by source (Edger/Behind/Side)
