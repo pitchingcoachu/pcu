@@ -4443,24 +4443,7 @@ pitch_ui <- function(show_header = FALSE) {
                     "Location",
                     style = "font-weight:bold; font-size:15px; margin-bottom:5px;"
                   ),
-                  div(
-                    style = "display:inline-block; width:80%;",
-                    selectInput(
-                      "summaryLocType",
-                      label    = NULL,
-                      choices  = c("Pitch", "Heat"),
-                      selected = "Pitch",
-                      width    = "100%"
-                    )
-                  )
-                ),
-                conditionalPanel(
-                  "input.summaryLocType=='Pitch'",
                   ggiraph::girafeOutput("summary_zonePlot", height = "300px", width = "100%")
-                ),
-                conditionalPanel(
-                  "input.summaryLocType=='Heat'",
-                  plotOutput("summary_heatZonePlot", height = "300px")
                 )
               )
             ),
@@ -12106,7 +12089,8 @@ server <- function(input, output, session) {
         ggiraph::opts_tooltip(use_fill = TRUE, use_stroke = TRUE, css = tooltip_css),
         ggiraph::opts_hover(css = "stroke:black;stroke-width:1.5px;"),
         ggiraph::opts_hover_inv(css = "opacity:0.15;")
-      )
+      ),
+      bg = "transparent"
     )
   })
   
