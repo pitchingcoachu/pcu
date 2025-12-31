@@ -12215,7 +12215,8 @@ server <- function(input, output, session) {
         ggiraph::opts_hover(css = "stroke:black;stroke-width:1.5px;"),
         ggiraph::opts_hover_inv(css = "opacity:0.15;"),
         ggiraph::opts_selection(type = "single", only_shiny = TRUE)  # <-- added: single-select
-      )
+      ),
+      bg = "transparent"
     )
   })
   
@@ -12289,7 +12290,8 @@ server <- function(input, output, session) {
         ggiraph::opts_hover(css = "stroke-width:1.5px;"),
         ggiraph::opts_hover_inv(css = "opacity:0.15;"),
         ggiraph::opts_selection(type = "single", only_shiny = TRUE)  # <-- added: single-select for reliable clicks
-      )
+      ),
+      bg = "transparent"
     )
   })
   
