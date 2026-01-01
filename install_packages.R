@@ -75,7 +75,8 @@ app_packages <- c(
   "plotly",
   "RCurl",
   "jsonlite",
-  "ggiraph"   # now treated as required
+  "ggiraph",   # now treated as required
+  "shinyjs"    # used for UI helpers/toggles
 )
 
 

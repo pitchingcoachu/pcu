@@ -35,7 +35,8 @@ required_packages <- c(
   "plotly",
   "RCurl",
   "jsonlite",
-  "digest"
+  "digest",
+  "shinyjs"
 )
 
 
