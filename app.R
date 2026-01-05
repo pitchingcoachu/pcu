@@ -17949,4 +17949,27 @@ server <- function(input, output, session) {
   # ============== END SERVER FUNCTION ==============
 }
 
+# Wrap UI with head tags for favicon and mobile web app support
+ui <- tagList(
+  tags$head(
+    # Page title
+    tags$title("PCU Dashboard"),
+    # Apple iOS home screen icon (enlarged logo)
+    tags$link(rel = "apple-touch-icon", href = "PCUlogo.png"),
+    tags$link(rel = "apple-touch-icon", sizes = "152x152", href = "PCUlogo.png"),
+    tags$link(rel = "apple-touch-icon", sizes = "180x180", href = "PCUlogo.png"),
+    tags$link(rel = "apple-touch-icon", sizes = "167x167", href = "PCUlogo.png"),
+    # Favicons for browser tabs (multiple sizes for better display - enlarged)
+    tags$link(rel = "icon", type = "image/png", sizes = "16x16", href = "PCUlogo.png"),
+    tags$link(rel = "icon", type = "image/png", sizes = "32x32", href = "PCUlogo.png"),
+    tags$link(rel = "icon", type = "image/png", sizes = "96x96", href = "PCUlogo.png"),
+    tags$link(rel = "icon", type = "image/png", href = "PCUlogo.png"),
+    # Apple mobile web app settings
+    tags$meta(name = "apple-mobile-web-app-capable", content = "yes"),
+    tags$meta(name = "apple-mobile-web-app-status-bar-style", content = "black-translucent"),
+    tags$meta(name = "apple-mobile-web-app-title", content = "PCU Dashboard")
+  ),
+  ui  # The original ui object
+)
+
 shinyApp(ui = ui, server = server)
