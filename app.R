@@ -825,7 +825,8 @@ datatable_with_colvis <- function(df, lock = character(0), remember = TRUE, defa
       stateSave     = remember,
       stateDuration = -1,
       pageLength    = 10,
-      autoWidth     = TRUE
+      autoWidth     = TRUE,
+      scrollX       = TRUE
     )
   )
 }
@@ -923,6 +924,7 @@ datatable_with_colvis <- function(df, lock = character(0), remember = TRUE, defa
       stateDuration = -1,
       pageLength    = 10,
       autoWidth     = TRUE,
+      scrollX       = TRUE,
       columnDefs    = defs
     )
   )
@@ -983,6 +985,7 @@ datatable_with_colvis <- function(df, lock = character(0), remember = TRUE, defa
         stateDuration = -1,
         pageLength    = 10,
         autoWidth     = TRUE,
+        scrollX       = TRUE,
         columnDefs    = defs
       )
     )
@@ -5716,7 +5719,8 @@ mod_hit_server <- function(id, is_active = shiny::reactive(TRUE)) {
           dom = "t",
           pageLength = max(5, nrow(df)),
           ordering = FALSE,
-          searching = FALSE
+          searching = FALSE,
+          scrollX = TRUE
         )
         DT::datatable(
           df,
@@ -6768,6 +6772,7 @@ mod_camps_server <- function(id, is_active = shiny::reactive(TRUE)) {
                            "\nSpin: ", ifelse(is.finite(SpinRate), round(SpinRate,0), NA), " rpm")
         ), size = 2.8, alpha = 0.9) +
         scale_color_manual(values = cols[types], limits = types, name = NULL) +
+        coord_cartesian(ylim = c(0, 8)) +
         labs(x = "Release Side (ft)", y = "Release Height (ft)") +
         theme_minimal() + theme(
           legend.position = "none",
@@ -6775,7 +6780,8 @@ mod_camps_server <- function(id, is_active = shiny::reactive(TRUE)) {
           axis.title = element_text(colour = axis_col),
           panel.background = element_rect(fill = NA, colour = NA),
           plot.background = element_rect(fill = NA, colour = NA),
-          panel.grid.major = element_line(color = scales::alpha(axis_col, 0.25))
+          panel.grid.major = element_line(color = scales::alpha(axis_col, 0.1)),
+          panel.grid.minor = element_blank()
         )
       
       ggiraph::girafe(ggobj = p, bg = "transparent")
@@ -6806,7 +6812,8 @@ mod_camps_server <- function(id, is_active = shiny::reactive(TRUE)) {
           axis.title = element_text(colour = axis_col),
           panel.background = element_rect(fill = NA, colour = NA),
           plot.background = element_rect(fill = NA, colour = NA),
-          panel.grid.major = element_line(color = scales::alpha(axis_col, 0.25))
+          panel.grid.major = element_line(color = scales::alpha(axis_col, 0.15)),
+          panel.grid.minor = element_blank()
         )
       
       ggiraph::girafe(ggobj = p, bg = "transparent")
@@ -8391,7 +8398,7 @@ mod_comp_server <- function(id, is_active = shiny::reactive(TRUE)) {
           axis.title = element_text(colour = axis_col),
           panel.background = element_rect(fill = NA, colour = NA),
           plot.background = element_rect(fill = NA, colour = NA),
-          panel.grid.major = element_line(color = scales::alpha(axis_col, grid_alpha)),
+          panel.grid.major = element_line(color = scales::alpha(axis_col, 0.1)),
           panel.grid.minor = element_blank()
         )
       ggiraph::girafe(
@@ -8416,7 +8423,6 @@ mod_comp_server <- function(id, is_active = shiny::reactive(TRUE)) {
       } else as.character(intersect(names(all_colors), unique(df$TaggedPitchType)))
       dark_on <- isTRUE(input$dark_mode)
       axis_col <- if (dark_on) "#e5e7eb" else "black"
-      grid_alpha <- if (dark_on) 0.15 else 0.35
       cols <- colors_for_mode(dark_on)
       mound_fill <- if (dark_on) "#2d2d2d" else "tan"
       rubber_fill <- if (dark_on) NA else "white"
@@ -8437,13 +8443,15 @@ mod_comp_server <- function(id, is_active = shiny::reactive(TRUE)) {
         geom_vline(xintercept = 0, color = axis_col, size = 0.7) +
         geom_point(data = avg, aes(avg_RelSide, avg_RelHeight, color = TaggedPitchType), size = 4) +
         scale_color_manual(values = cols[types], limits = types, name = NULL) +
+        coord_cartesian(ylim = c(0, 8)) +
         theme_minimal() + axis_th + theme(
           legend.position = "none",
           axis.text = element_text(colour = axis_col),
           axis.title = element_text(colour = axis_col),
           panel.background = element_rect(fill = NA, colour = NA),
           plot.background = element_rect(fill = NA, colour = NA),
-          panel.grid.major = element_line(color = scales::alpha(axis_col, grid_alpha))
+          panel.grid.major = element_line(color = scales::alpha(axis_col, 0.1)),
+          panel.grid.minor = element_blank()
         ) +
         labs(x = NULL, y = NULL)
     }
@@ -9636,19 +9644,6 @@ $(document).off('click.pcuOpenMedia', 'a.open-media')
                  class = "btn btn-note", title = "Add Note"),
     top = 8, right = 12, width = 50, fixed = TRUE, draggable = FALSE
   ),
-  absolutePanel(
-    style = "background:rgba(0,0,0,0.4); border-radius:12px; padding:8px 12px; color:#fff; z-index:2000;",
-    tags$div(
-      class = "dark-toggle",
-      tags$label(
-        class = "switch-label",
-        tags$input(id = "dark_mode", type = "checkbox"),
-        tags$span(class = "switch-track", tags$span(class = "switch-thumb")),
-        tags$span(class = "switch-text", "Dark mode")
-      )
-    ),
-    top = 80, left = 12, width = 170, fixed = TRUE, draggable = FALSE
-  ),
 
   tags$style(HTML("
     /* Transparent backgrounds for summary plots/key */
@@ -9856,6 +9851,16 @@ $(document).off('click.pcuOpenMedia', 'a.open-media')
     .dark-toggle input#dark_mode:checked + .switch-track { background: #c1121f; }
     .dark-toggle input#dark_mode:checked + .switch-track .switch-thumb { transform: translateX(24px); }
     .dark-toggle .switch-text { font-weight:600; color:#e5e7eb; }
+    
+    /* Static dark mode toggle positioned below navbar */
+    .dark-mode-container {
+      position: relative;
+      background: rgba(0,0,0,0.4);
+      border-radius: 12px;
+      padding: 8px 12px;
+      margin: 12px;
+      width: fit-content;
+    }
   ")),
   
   navbarPage(
@@ -9865,6 +9870,18 @@ $(document).off('click.pcuOpenMedia', 'a.open-media')
     ),
     id = "top",
     inverse = TRUE,
+    header = tags$div(
+      class = "dark-mode-container",
+      tags$div(
+        class = "dark-toggle",
+        tags$label(
+          class = "switch-label",
+          tags$input(id = "dark_mode", type = "checkbox"),
+          tags$span(class = "switch-track", tags$span(class = "switch-thumb")),
+          tags$span(class = "switch-text", "Dark mode")
+        )
+      )
+    ),
     tabPanel("Pitching",   value = "Pitching",   pitch_ui()),
     tabPanel("Hitting",    value = "Hitting",    mod_hit_ui("hit")),
     tabPanel("Leaderboard", value = "Leaderboard", mod_leader_ui("leader")),
@@ -11559,7 +11576,7 @@ server <- function(input, output, session) {
       # Escape Author, Date, Note; leave Filter & Attachment unescaped so links work
       escape   = c(1, 2, 4),
       rownames = FALSE,
-      options  = list(pageLength = 25, order = list(list(1, "desc")))
+      options  = list(pageLength = 25, order = list(list(1, "desc")), scrollX = TRUE)
     )
   }
   
@@ -11582,7 +11599,7 @@ server <- function(input, output, session) {
       out,
       escape   = FALSE,             # needed so the "Open attachment" link renders
       rownames = FALSE,
-      options  = list(dom = 'Bfrtip', pageLength = 10)
+      options  = list(dom = 'Bfrtip', pageLength = 10, scrollX = TRUE)
     )
   })
   
@@ -12383,7 +12400,7 @@ server <- function(input, output, session) {
       )
     
     # --- ensure y axis goes to at least 6
-    y_max <- max(6, suppressWarnings(max(df$RelHeight, na.rm = TRUE) + 0.2))
+    y_max <- 8
     
     p <- ggplot() +
       geom_polygon(data = mound, aes(x, y), fill = mound_fill, color = mound_fill) +
@@ -12406,7 +12423,7 @@ server <- function(input, output, session) {
         panel.background = element_rect(fill = NA, colour = NA),
         plot.background = element_rect(fill = NA, colour = NA),
         panel.grid.minor = element_blank(),
-        panel.grid.major = element_line(color = scales::alpha(line_col, grid_alpha))
+        panel.grid.major = element_line(color = scales::alpha(line_col, 0.1))
       )
     
     ggiraph::girafe(
@@ -12523,7 +12540,7 @@ server <- function(input, output, session) {
         panel.background = element_rect(fill = NA, colour = NA),
         plot.background = element_rect(fill = NA, colour = NA),
         panel.grid.minor = element_blank(),
-        panel.grid.major = element_line(color = scales::alpha(axis_col, grid_alpha))
+        panel.grid.major = element_line(color = scales::alpha(axis_col, 0.1))
       )
     
     ggiraph::girafe(
@@ -14301,13 +14318,14 @@ server <- function(input, output, session) {
         size = 4, show.legend = FALSE
       ) +
       scale_color_manual(values = cols[types_chr], limits = types_chr, name = NULL) +
-      scale_y_continuous(limits = c(0, y_max), breaks = seq(0, ceiling(y_max), by = 1)) +
+      scale_y_continuous(limits = c(0, 8), breaks = seq(0, 8, by = 1)) +
       theme_minimal() + axis_theme + labs(x = NULL, y = NULL) +
       theme(
         axis.text = element_text(colour = axis_col),
         panel.background = element_rect(fill = NA, colour = NA),
         plot.background = element_rect(fill = NA, colour = NA),
-        panel.grid.major = element_line(color = scales::alpha(axis_col, 0.25))
+        panel.grid.major = element_line(color = scales::alpha(axis_col, 0.1)),
+        panel.grid.minor = element_blank()
       )
     
     # --- (B) Extension vs Height averages
@@ -14472,7 +14490,7 @@ server <- function(input, output, session) {
         panel.background = element_rect(fill = NA, colour = NA),
         plot.background = element_rect(fill = NA, colour = NA),
         panel.grid.minor = element_blank(),
-        panel.grid.major = element_line(color = scales::alpha(axis_col, grid_alpha))
+        panel.grid.major = element_line(color = scales::alpha(axis_col, 0.1))
       )
     
     ggiraph::girafe(
@@ -17532,7 +17550,8 @@ server <- function(input, output, session) {
         lengthChange = FALSE,
         ordering = FALSE,
         paging = TRUE,
-        dom = 'tp'
+        dom = 'tp',
+        scrollX = TRUE
       ),
       rownames = FALSE
     )
@@ -17553,7 +17572,8 @@ server <- function(input, output, session) {
         lengthChange = FALSE,
         ordering = FALSE,
         paging = TRUE,
-        dom = 'tp'
+        dom = 'tp',
+        scrollX = TRUE
       ),
       rownames = FALSE
     )
@@ -17574,7 +17594,8 @@ server <- function(input, output, session) {
         lengthChange = FALSE,
         ordering = FALSE,
         paging = TRUE,
-        dom = 'tp'
+        dom = 'tp',
+        scrollX = TRUE
       ),
       rownames = FALSE
     )
