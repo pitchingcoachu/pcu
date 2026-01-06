@@ -9941,21 +9941,19 @@ $(document).on('click', 'td.clickable-cell, .pitch-count-link', function(e) {
       background: transparent !important;
     }
     
-    /* Fix multi-select filter blocks - use red background instead of white */
-    body.theme-dark .selectize-input.has-items {
+    /* Fix multi-select filter bubbles - only the item bubbles should be red */
+    body.theme-dark .selectize-input .item {
       background: linear-gradient(135deg, #c1121f 0%, #8b0d17 100%) !important;
-      color: #ffffff !important;
-    }
-    body.theme-dark .selectize-input.has-items .item {
-      background: rgba(0,0,0,0.25) !important;
       color: #ffffff !important;
       border-color: rgba(255,255,255,0.3) !important;
     }
-    body.theme-dark .selectize-input.focus.has-items {
-      background: linear-gradient(135deg, #c1121f 0%, #8b0d17 100%) !important;
+    body.theme-dark .selectize-input.has-items {
+      background: #0f172a !important;
+      color: #e5e7eb !important;
     }
-    body.theme-dark .selectize-input .item {
-      color: #000000 !important;
+    body.theme-dark .selectize-input.focus.has-items {
+      background: #0f172a !important;
+      border-color: #c1121f !important;
     }
     
     /* Fix right-handed batter names in AB Report - should be white in dark mode */
@@ -9990,7 +9988,7 @@ $(document).on('click', 'td.clickable-cell, .pitch-count-link', function(e) {
       background: transparent !important;
     }
     
-    /* Fix video popup modal - black text in dark mode */
+    /* Fix video popup modal - white background with black text for labels, white for badges */
     body.theme-dark .modal-content {
       background: #ffffff !important;
       color: #000000 !important;
@@ -10001,16 +9999,18 @@ $(document).on('click', 'td.clickable-cell, .pitch-count-link', function(e) {
       background: #ffffff !important;
       color: #000000 !important;
     }
-    body.theme-dark .modal-body * {
-      color: #000000 !important;
-    }
     body.theme-dark .modal-body label,
     body.theme-dark .modal-body .control-label,
-    body.theme-dark .modal-body strong,
-    body.theme-dark .modal-body span,
-    body.theme-dark .modal-body p,
-    body.theme-dark .modal-body div {
+    body.theme-dark .modal-body strong {
       color: #000000 !important;
+    }
+    /* Keep white text for badges/bubbles in modal */
+    body.theme-dark .modal-body .badge,
+    body.theme-dark .modal-body .label,
+    body.theme-dark .modal-body .selectize-input .item,
+    body.theme-dark .modal-body span.badge,
+    body.theme-dark .modal-body span.label {
+      color: #ffffff !important;
     }
     
     /* Toggle switch styling */
