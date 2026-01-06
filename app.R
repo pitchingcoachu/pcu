@@ -9990,6 +9990,29 @@ $(document).on('click', 'td.clickable-cell, .pitch-count-link', function(e) {
       background: transparent !important;
     }
     
+    /* Fix video popup modal - black text in dark mode */
+    body.theme-dark .modal-content {
+      background: #ffffff !important;
+      color: #000000 !important;
+    }
+    body.theme-dark .modal-header,
+    body.theme-dark .modal-body,
+    body.theme-dark .modal-footer {
+      background: #ffffff !important;
+      color: #000000 !important;
+    }
+    body.theme-dark .modal-body * {
+      color: #000000 !important;
+    }
+    body.theme-dark .modal-body label,
+    body.theme-dark .modal-body .control-label,
+    body.theme-dark .modal-body strong,
+    body.theme-dark .modal-body span,
+    body.theme-dark .modal-body p,
+    body.theme-dark .modal-body div {
+      color: #000000 !important;
+    }
+    
     /* Toggle switch styling */
     .dark-toggle { display:flex; align-items:center; gap:10px; }
     .dark-toggle .switch-label { display:flex; align-items:center; gap:10px; margin:0; cursor:pointer; }
