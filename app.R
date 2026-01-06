@@ -9976,8 +9976,8 @@ $(document).on('click', 'td.clickable-cell, .pitch-count-link', function(e) {
     body.theme-dark #correlations .panel,
     body.theme-dark #correlations .panel-default,
     body.theme-dark #correlations .shiny-plot-output,
-    body.theme-dark div[id*="corr"] .well,
-    body.theme-dark div[id*="corr"] .panel {
+    body.theme-dark div[id*='corr'] .well,
+    body.theme-dark div[id*='corr'] .panel {
       background: transparent !important;
     }
     
@@ -9985,8 +9985,8 @@ $(document).on('click', 'td.clickable-cell, .pitch-count-link', function(e) {
     body.theme-dark #player_plans .well,
     body.theme-dark #player_plans .panel,
     body.theme-dark #player_plans .panel-default,
-    body.theme-dark div[id*="plan"] .well,
-    body.theme-dark div[id*="plan"] .panel {
+    body.theme-dark div[id*='plan'] .well,
+    body.theme-dark div[id*='plan'] .panel {
       background: transparent !important;
     }
     
