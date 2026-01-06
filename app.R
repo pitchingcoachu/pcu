@@ -9940,6 +9940,56 @@ $(document).on('click', 'td.clickable-cell, .pitch-count-link', function(e) {
     body.theme-dark #cmpB_heat img {
       background: transparent !important;
     }
+    
+    /* Fix multi-select filter blocks - use red background instead of white */
+    body.theme-dark .selectize-input.has-items {
+      background: linear-gradient(135deg, #c1121f 0%, #8b0d17 100%) !important;
+      color: #ffffff !important;
+    }
+    body.theme-dark .selectize-input.has-items .item {
+      background: rgba(0,0,0,0.25) !important;
+      color: #ffffff !important;
+      border-color: rgba(255,255,255,0.3) !important;
+    }
+    body.theme-dark .selectize-input.focus.has-items {
+      background: linear-gradient(135deg, #c1121f 0%, #8b0d17 100%) !important;
+    }
+    body.theme-dark .selectize-input .item {
+      color: #000000 !important;
+    }
+    
+    /* Fix right-handed batter names in AB Report - should be white in dark mode */
+    .batter-name-rh {
+      color: #000000;
+    }
+    body.theme-dark .batter-name-rh {
+      color: #ffffff !important;
+    }
+    body.theme-dark div[style*="color:#000000"],
+    body.theme-dark div[style*="color: #000000"] {
+      color: #ffffff !important;
+    }
+    
+    /* Fix Correlations page - transparent backgrounds */
+    body.theme-dark #correlations .well,
+    body.theme-dark #correlations .sidebar-panel,
+    body.theme-dark #correlations .panel,
+    body.theme-dark #correlations .panel-default,
+    body.theme-dark #correlations .shiny-plot-output,
+    body.theme-dark div[id*="corr"] .well,
+    body.theme-dark div[id*="corr"] .panel {
+      background: transparent !important;
+    }
+    
+    /* Fix Player Plans page - transparent backgrounds */
+    body.theme-dark #player_plans .well,
+    body.theme-dark #player_plans .panel,
+    body.theme-dark #player_plans .panel-default,
+    body.theme-dark div[id*="plan"] .well,
+    body.theme-dark div[id*="plan"] .panel {
+      background: transparent !important;
+    }
+    
     /* Toggle switch styling */
     .dark-toggle { display:flex; align-items:center; gap:10px; }
     .dark-toggle .switch-label { display:flex; align-items:center; gap:10px; margin:0; cursor:pointer; }
@@ -14291,12 +14341,13 @@ server <- function(input, output, session) {
       bat <- first_idx$Batter[bi]
       dB  <- df_all %>% dplyr::filter(Batter == bat)
       
-      # Batter side & name label with color (Left = red, Right = black)
+      # Batter side & name label with color (Left = red, Right = adapts to theme)
       side <- as.character(dplyr::coalesce(dB$BatterSide[which.max(seq_len(nrow(dB)))], NA))
       lr   <- ifelse(is.na(side), "", ifelse(grepl("^L", side, ignore.case = TRUE), "L", "R"))
       is_left <- identical(lr, "L")
       name_html <- tags$div(
-        style = paste0("font-weight:700; color:", if (is_left) "#d32f2f" else "#000000", ";"),
+        style = paste0("font-weight:700;", if (is_left) " color:#d32f2f;" else ""),
+        class = if (!is_left) "batter-name-rh" else NULL,
         paste0(.abp_pretty_name(bat), " (", lr, ")")
       )
       
