@@ -9617,6 +9617,28 @@ $(document).off('click.pcuOpenMedia', 'a.open-media')
     if(!url) return;
     Shiny.setInputValue('open_media', {url: url, type: typ, nonce: Math.random()}, {priority:'event'});
   });
+
+// Mobile sidebar toggle functionality
+$(document).ready(function() {
+  // Only apply on mobile screens
+  function setupMobileSidebar() {
+    if ($(window).width() <= 768) {
+      $('.well.sidebar-panel').off('click.mobileSidebar').on('click.mobileSidebar', function(e) {
+        // Don't toggle if clicking on an actual input/select element
+        if ($(e.target).is('input, select, option, button, label, .selectize-input, .selectize-dropdown')) {
+          return;
+        }
+        $(this).toggleClass('expanded');
+        e.stopPropagation();
+      });
+    } else {
+      $('.well.sidebar-panel').off('click.mobileSidebar').addClass('expanded');
+    }
+  }
+  
+  setupMobileSidebar();
+  $(window).resize(setupMobileSidebar);
+});
 ")),
   
   tags$style(HTML("
@@ -9860,6 +9882,54 @@ $(document).off('click.pcuOpenMedia', 'a.open-media')
       padding: 8px 12px;
       margin: 12px;
       width: fit-content;
+    }
+    
+    /* ===== MOBILE RESPONSIVE SIDEBAR ===== */
+    @media (max-width: 768px) {
+      /* Make sidebar collapsible on mobile */
+      .col-sm-4 {
+        position: relative;
+      }
+      
+      /* Collapse sidebar by default on mobile */
+      .well.sidebar-panel {
+        max-height: 60px;
+        overflow: hidden;
+        transition: max-height 0.3s ease;
+        cursor: pointer;
+        position: relative;
+      }
+      
+      /* Add indicator for collapsed state */
+      .well.sidebar-panel:before {
+        content: '▼ Tap to expand filters';
+        display: block;
+        font-weight: 600;
+        color: #c1121f;
+        padding: 10px;
+        text-align: center;
+        font-size: 14px;
+      }
+      
+      /* Expanded state */
+      .well.sidebar-panel.expanded {
+        max-height: none;
+        cursor: default;
+      }
+      
+      .well.sidebar-panel.expanded:before {
+        content: '▲ Tap to collapse filters';
+      }
+      
+      /* Hide actual filters when collapsed */
+      .well.sidebar-panel:not(.expanded) > *:not(:first-child) {
+        display: none;
+      }
+      
+      /* Main content takes full width on mobile when sidebar collapsed */
+      .col-sm-8 {
+        width: 100%;
+      }
     }
   ")),
   
