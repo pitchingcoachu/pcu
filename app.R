@@ -9620,19 +9620,30 @@ $(document).off('click.pcuOpenMedia', 'a.open-media')
 
 // Mobile sidebar toggle functionality
 $(document).ready(function() {
-  // Only apply on mobile screens
   function setupMobileSidebar() {
-    if ($(window).width() <= 768) {
-      $('.well.sidebar-panel').off('click.mobileSidebar').on('click.mobileSidebar', function(e) {
-        // Don't toggle if clicking on an actual input/select element
-        if ($(e.target).is('input, select, option, button, label, .selectize-input, .selectize-dropdown')) {
-          return;
-        }
-        $(this).toggleClass('expanded');
-        e.stopPropagation();
+    var isMobile = $(window).width() <= 768;
+    var $sidebars = $('.col-sm-4 .well, .sidebar-panel, .well.sidebar-panel');
+    
+    if (isMobile) {
+      $sidebars.each(function() {
+        var $sidebar = $(this);
+        
+        // Add mobile-sidebar class for CSS targeting
+        $sidebar.addClass('mobile-sidebar');
+        
+        // Add click handler
+        $sidebar.off('click.mobileSidebar').on('click.mobileSidebar', function(e) {
+          // Don't toggle if clicking on an actual input/select element
+          if ($(e.target).is('input, select, option, button, label, .selectize-input, .selectize-dropdown, a') ||
+              $(e.target).closest('.form-group, .shiny-input-container').length > 0) {
+            return;
+          }
+          $(this).toggleClass('expanded');
+          e.stopPropagation();
+        });
       });
     } else {
-      $('.well.sidebar-panel').off('click.mobileSidebar').addClass('expanded');
+      $sidebars.removeClass('mobile-sidebar').addClass('expanded').off('click.mobileSidebar');
     }
   }
   
@@ -9886,49 +9897,64 @@ $(document).ready(function() {
     
     /* ===== MOBILE RESPONSIVE SIDEBAR ===== */
     @media (max-width: 768px) {
-      /* Make sidebar collapsible on mobile */
-      .col-sm-4 {
-        position: relative;
-      }
-      
-      /* Collapse sidebar by default on mobile */
-      .well.sidebar-panel {
-        max-height: 60px;
-        overflow: hidden;
-        transition: max-height 0.3s ease;
-        cursor: pointer;
+      /* Target all sidebars on mobile */
+      .col-sm-4 .well,
+      .sidebar-panel,
+      .well.sidebar-panel,
+      .mobile-sidebar {
+        max-height: 60px !important;
+        overflow: hidden !important;
+        transition: max-height 0.3s ease, opacity 0.3s ease;
+        cursor: pointer !important;
         position: relative;
       }
       
       /* Add indicator for collapsed state */
-      .well.sidebar-panel:before {
-        content: '▼ Tap to expand filters';
-        display: block;
-        font-weight: 600;
-        color: #c1121f;
-        padding: 10px;
-        text-align: center;
-        font-size: 14px;
+      .col-sm-4 .well:before,
+      .sidebar-panel:before,
+      .well.sidebar-panel:before,
+      .mobile-sidebar:before {
+        content: '▼ Tap to show filters' !important;
+        display: block !important;
+        font-weight: 700 !important;
+        color: #c1121f !important;
+        background: rgba(193, 18, 31, 0.1);
+        padding: 15px !important;
+        text-align: center !important;
+        font-size: 16px !important;
+        border-radius: 4px;
+        margin: 5px;
       }
       
       /* Expanded state */
-      .well.sidebar-panel.expanded {
-        max-height: none;
-        cursor: default;
+      .col-sm-4 .well.expanded,
+      .sidebar-panel.expanded,
+      .well.sidebar-panel.expanded,
+      .mobile-sidebar.expanded {
+        max-height: 10000px !important;
+        overflow: visible !important;
+        cursor: default !important;
       }
       
-      .well.sidebar-panel.expanded:before {
-        content: '▲ Tap to collapse filters';
+      .col-sm-4 .well.expanded:before,
+      .sidebar-panel.expanded:before,
+      .well.sidebar-panel.expanded:before,
+      .mobile-sidebar.expanded:before {
+        content: '▲ Tap to hide filters' !important;
+        background: rgba(193, 18, 31, 0.2);
       }
       
       /* Hide actual filters when collapsed */
-      .well.sidebar-panel:not(.expanded) > *:not(:first-child) {
-        display: none;
+      .col-sm-4 .well:not(.expanded) > *,
+      .sidebar-panel:not(.expanded) > *,
+      .well.sidebar-panel:not(.expanded) > *,
+      .mobile-sidebar:not(.expanded) > * {
+        display: none !important;
       }
       
-      /* Main content takes full width on mobile when sidebar collapsed */
+      /* Main content takes full width on mobile */
       .col-sm-8 {
-        width: 100%;
+        width: 100% !important;
       }
     }
   ")),
