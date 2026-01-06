@@ -897,6 +897,16 @@ datatable_with_colvis <- function(df, lock = character(0), remember = TRUE, defa
   colvis_idx <- setdiff(all_idx0, idx_lock)
   
   defs <- list(list(className = 'dt-center', targets = "_all"))
+  
+  # Make # column explicitly clickable with special styling
+  idx_hash <- which(names(df) == "#") - 1
+  if (length(idx_hash)) {
+    defs <- c(defs, list(list(
+      className = 'dt-center clickable-cell',
+      targets = idx_hash
+    )))
+  }
+  
   idx_pct <- which(grepl("%$", names(df)) | names(df) %in% c("SpinEff")) - 1
   if (length(idx_pct)) {
     defs <- c(defs, list(list(targets = idx_pct, render = DT::JS(js_sort))))
@@ -4478,7 +4488,11 @@ pitch_ui <- function(show_header = FALSE) {
             "AB Report",
             value = "pitch_ab_report",
             sidebarLayout(
-              sidebarPanel(width = 3, uiOutput("abpSidebar")),
+              sidebarPanel(
+                uiOutput("abpSidebar"),
+                width = 3,
+                class = "sidebar"
+              ),
               mainPanel(
                 width = 9,
                 div(style = "display:flex; align-items:baseline; gap:12px; margin-bottom:8px;",
@@ -4528,7 +4542,8 @@ pitch_ui <- function(show_header = FALSE) {
                 selectInput("locResult", "Pitch Results:", choices = c("All", result_levels),
                             selected = "All", multiple = TRUE),
                 uiOutput("locLegend"),
-                width = 3
+                width = 3,
+                class = "sidebar"
               ),
               mainPanel(
                 conditionalPanel("input.hmChartType=='Heat'",  plotOutput("heatmapsHeatPlot", height = "500px")),
@@ -4565,7 +4580,8 @@ pitch_ui <- function(show_header = FALSE) {
                   ),
                   selected = "Velocity (Avg)"
                 ),
-                width = 3
+                width = 3,
+                class = "sidebar"
               ),
               mainPanel(
                 uiOutput("trendPlotUI"),
@@ -7972,7 +7988,8 @@ mod_comp_ui <- function(id, show_header = FALSE) {
     sidebarLayout(
       sidebarPanel(
         selectInput(ns("domain"), "Player Type:", choices = c("Pitcher","Hitter","Catcher"), selected = "Pitcher"),
-        width = 2
+        width = 2,
+        class = "sidebar"
       ),
       mainPanel(
         # ---- TWO-PANEL COMPARISON (same layout as Pitching > Comparison Tool) ----
@@ -8954,10 +8971,9 @@ player_plans_ui <- function() {
       "))
     ),
     
-    sidebarLayout(
-      sidebarPanel(
-        width = 3,
-        h4("Player Plans"),
+  sidebarLayout(
+    sidebarPanel(
+      h4("Player Plans"),
         selectInput("pp_player_select", "Select Player:",
                     choices = NULL,
                     selected = NULL),
@@ -9197,7 +9213,9 @@ player_plans_ui <- function() {
                              value = "")
             )
           )
-        )
+        ),
+        width = 3,
+        class = "sidebar"
       ),
       
       mainPanel(
@@ -9382,6 +9400,28 @@ ui <- tagList(
       .sidebar .well, .col-sm-3 .well, .col-sm-4 .well {
         background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
         border-left: 4px solid #c1121f;
+      }
+
+      .sidebar-accordion {
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        background: #fff;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+        position: relative;
+        border-left: 4px solid #c1121f;
+        margin-bottom: 16px;
+      }
+      .sidebar-accordion-summary {
+        padding: 14px;
+        font-weight: 800;
+        font-size: 16px;
+        cursor: pointer;
+      }
+      .sidebar-accordion-body {
+        padding: 12px;
+      }
+      .sidebar-accordion-body .well {
+        border-left: none;
       }
 
       /* Form Controls - Modern inputs */
@@ -9618,51 +9658,42 @@ $(document).off('click.pcuOpenMedia', 'a.open-media')
     Shiny.setInputValue('open_media', {url: url, type: typ, nonce: Math.random()}, {priority:'event'});
   });
 
-// Mobile sidebar toggle functionality with actual button
-$(document).ready(function() {
-  function setupMobileSidebar() {
-    var isMobile = $(window).width() <= 768;
-    var $sidebars = $('.col-sm-4');
-    
-    if (isMobile) {
-      $sidebars.each(function() {
-        var $container = $(this);
-        var $well = $container.find('.well').first();
-        
-        // Skip if already has toggle button
-        if ($container.find('.mobile-filter-toggle').length > 0) return;
-        
-        // Create toggle button
-        var $toggleBtn = $('<button class=\"mobile-filter-toggle btn\" style=\"width:100%; margin-bottom:10px; background:#c1121f; color:white; font-weight:bold; padding:12px;\"><span class=\"toggle-icon\">▼</span> Show Filters</button>');
-        
-        // Hide filters by default
-        $well.hide();
-        
-        // Insert button before the well
-        $well.before($toggleBtn);
-        
-        // Toggle on button click
-        $toggleBtn.on('click', function(e) {
-          e.preventDefault();
-          e.stopPropagation();
-          var $btn = $(this);
-          var $wellToToggle = $btn.siblings('.well');
-          
-          $wellToToggle.slideToggle(300, function() {
-            var isVisible = $wellToToggle.is(':visible');
-            $btn.html(isVisible ? '<span class=\"toggle-icon\">▲</span> Hide Filters' : '<span class=\"toggle-icon\">▼</span> Show Filters');
-          });
-        });
-      });
-    } else {
-      // Desktop: remove toggle buttons and show filters
-      $sidebars.find('.mobile-filter-toggle').remove();
-      $sidebars.find('.well').show();
+// Mobile sidebar: replace full panel with a single dropdown accordion (matches gcu)
+document.addEventListener('DOMContentLoaded', function() {
+  var transform = function(sidebar) {
+    if (!sidebar || sidebar.dataset.mobileAccordion) return;
+    if (window.innerWidth > 768) return;
+    // Only convert elements that actually contain sidebar content
+    var well = sidebar.querySelector('.well');
+    if (!well) return;
+    var details = document.createElement('details');
+    details.className = 'sidebar-accordion';
+    var summary = document.createElement('summary');
+    summary.textContent = 'Filters';
+    summary.className = 'sidebar-accordion-summary';
+    var body = document.createElement('div');
+    body.className = 'sidebar-accordion-body';
+    while (sidebar.firstChild && sidebar.firstChild !== details) {
+      body.appendChild(sidebar.firstChild);
     }
-  }
-  
-  setupMobileSidebar();
-  $(window).on('resize.mobileSidebar', setupMobileSidebar);
+    details.appendChild(summary);
+    details.appendChild(body);
+    sidebar.appendChild(details);
+    sidebar.dataset.mobileAccordion = '1';
+  };
+  var init = function() {
+    document.querySelectorAll('.sidebar, .col-sm-3, .col-sm-4').forEach(transform);
+  };
+  init();
+  window.addEventListener('resize', function() {
+    // Do not rebuild; only apply on first mobile render to avoid moving nodes back and forth
+  });
+  document.addEventListener('shiny:recalculating', function() { setTimeout(init, 200); });
+});
+
+// Click handler for # pitch count links → ensure clicks work
+$(document).on('click', 'td.clickable-cell, .pitch-count-link', function(e) {
+  // Let DT handle the click naturally - no special processing needed
 });
 ")),
   
@@ -9705,6 +9736,25 @@ $(document).ready(function() {
     #summary_zonePlot svg {
       background: transparent !important;
     }
+    
+    /* Make # column cells and links clickable with visual feedback */
+    .clickable-cell {
+      cursor: pointer !important;
+    }
+    .clickable-cell:hover {
+      background-color: rgba(0, 123, 255, 0.1) !important;
+    }
+    .pitch-count-link {
+      color: #007bff !important;
+      text-decoration: none !important;
+      cursor: pointer !important;
+      display: inline-block;
+      width: 100%;
+    }
+    .pitch-count-link:hover {
+      text-decoration: underline !important;
+      color: #0056b3 !important;
+    }
 
     /* ===== Dark mode overrides ===== */
     body.theme-dark {
@@ -9738,6 +9788,15 @@ $(document).ready(function() {
       border-left: 4px solid #c1121f;
       color: #e5e7eb;
       box-shadow: 0 4px 20px rgba(0,0,0,0.35);
+    }
+    body.theme-dark .sidebar-accordion,
+    body.theme-dark .sidebar-accordion-body {
+      background: transparent !important;
+      border: none !important;
+      box-shadow: none !important;
+    }
+    body.theme-dark .sidebar-accordion-summary {
+      color: #e5e7eb;
     }
     body.theme-dark .form-control,
     body.theme-dark .selectize-input {
@@ -9911,33 +9970,10 @@ $(document).ready(function() {
     
     /* ===== MOBILE RESPONSIVE SIDEBAR ===== */
     @media (max-width: 768px) {
-      /* Mobile filter toggle button styling */
-      .mobile-filter-toggle {
-        display: block !important;
-        width: 100%;
-        background-color: #c1121f !important;
-        color: white !important;
-        border: none !important;
-        font-weight: bold !important;
-        padding: 15px !important;
-        font-size: 16px !important;
-        border-radius: 8px !important;
-        margin-bottom: 10px !important;
-        cursor: pointer !important;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-        transition: background-color 0.2s ease;
-      }
-      
-      .mobile-filter-toggle:hover {
-        background-color: #8b0d17 !important;
-      }
-      
-      .mobile-filter-toggle .toggle-icon {
-        font-size: 14px;
-        margin-right: 8px;
-      }
-      
-      /* Main content takes full width on mobile */
+      .sidebar { display: block !important; }
+      .sidebar details.sidebar-accordion { display: block; margin-bottom: 20px; }
+      .sidebar .well { padding: 0; border: none; box-shadow: none; background: transparent; }
+      .sidebar .sidebar-accordion-body .well { padding: 16px; }
       .col-sm-8 {
         width: 100% !important;
       }
@@ -11364,6 +11400,31 @@ server <- function(input, output, session) {
       input[["comp-cmpB_table_cell_clicked"]],
       table_cache_fetcher("comp-cmpB_table"),
       table_label = "Comparison"
+    )
+  }, ignoreNULL = TRUE)
+  
+  cache_for_table_id <- function(id) {
+    switch(
+      id,
+      "summaryTablePage"         = table_cache_fetcher("summaryTablePage"),
+      "summaryTable"             = table_cache_fetcher("summaryTable"),
+      "leader-lbTable"           = table_cache_fetcher("leader-lbTable"),
+      "leader-lbCatchTable"      = table_cache_fetcher("leader-lbCatchTable"),
+      "comp-cmpA_table"          = table_cache_fetcher("comp-cmpA_table"),
+      "comp-cmpB_table"          = table_cache_fetcher("comp-cmpB_table"),
+      NULL
+    )
+  }
+  
+  observeEvent(input$pitch_count_click, {
+    info <- input$pitch_count_click
+    if (is.null(info) || is.null(info$tableId)) return()
+    cache_fn <- cache_for_table_id(info$tableId)
+    if (is.null(cache_fn)) return()
+    handle_pitch_table_click(
+      info,
+      cache_fn,
+      table_label = info$tableId %||% NULL
     )
   }, ignoreNULL = TRUE)
   
@@ -14068,11 +14129,11 @@ server <- function(input, output, session) {
   })
   
   observeEvent(input$summaryTablePage_cell_clicked, {
-    handle_pitch_table_click(input$summaryTablePage_cell_clicked, summary_table_page_cache, table_label = "Summary")
+    handle_pitch_table_click(input$summaryTablePage_cell_clicked, table_cache_fetcher("summaryTablePage"), table_label = "Summary")
   }, ignoreNULL = TRUE)
   
   observeEvent(input$summaryTable_cell_clicked, {
-    handle_pitch_table_click(input$summaryTable_cell_clicked, summary_table_cache, table_label = "Data & Performance")
+    handle_pitch_table_click(input$summaryTable_cell_clicked, table_cache_fetcher("summaryTable"), table_label = "Data & Performance")
   }, ignoreNULL = TRUE)
   
   # ================================
