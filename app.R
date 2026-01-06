@@ -9618,37 +9618,51 @@ $(document).off('click.pcuOpenMedia', 'a.open-media')
     Shiny.setInputValue('open_media', {url: url, type: typ, nonce: Math.random()}, {priority:'event'});
   });
 
-// Mobile sidebar toggle functionality
+// Mobile sidebar toggle functionality with actual button
 $(document).ready(function() {
   function setupMobileSidebar() {
     var isMobile = $(window).width() <= 768;
-    var $sidebars = $('.col-sm-4 .well, .sidebar-panel, .well.sidebar-panel');
+    var $sidebars = $('.col-sm-4');
     
     if (isMobile) {
       $sidebars.each(function() {
-        var $sidebar = $(this);
+        var $container = $(this);
+        var $well = $container.find('.well').first();
         
-        // Add mobile-sidebar class for CSS targeting
-        $sidebar.addClass('mobile-sidebar');
+        // Skip if already has toggle button
+        if ($container.find('.mobile-filter-toggle').length > 0) return;
         
-        // Add click handler
-        $sidebar.off('click.mobileSidebar').on('click.mobileSidebar', function(e) {
-          // Don't toggle if clicking on an actual input/select element
-          if ($(e.target).is('input, select, option, button, label, .selectize-input, .selectize-dropdown, a') ||
-              $(e.target).closest('.form-group, .shiny-input-container').length > 0) {
-            return;
-          }
-          $(this).toggleClass('expanded');
+        // Create toggle button
+        var $toggleBtn = $('<button class=\"mobile-filter-toggle btn\" style=\"width:100%; margin-bottom:10px; background:#c1121f; color:white; font-weight:bold; padding:12px;\"><span class=\"toggle-icon\">▼</span> Show Filters</button>');
+        
+        // Hide filters by default
+        $well.hide();
+        
+        // Insert button before the well
+        $well.before($toggleBtn);
+        
+        // Toggle on button click
+        $toggleBtn.on('click', function(e) {
+          e.preventDefault();
           e.stopPropagation();
+          var $btn = $(this);
+          var $wellToToggle = $btn.siblings('.well');
+          
+          $wellToToggle.slideToggle(300, function() {
+            var isVisible = $wellToToggle.is(':visible');
+            $btn.html(isVisible ? '<span class=\"toggle-icon\">▲</span> Hide Filters' : '<span class=\"toggle-icon\">▼</span> Show Filters');
+          });
         });
       });
     } else {
-      $sidebars.removeClass('mobile-sidebar').addClass('expanded').off('click.mobileSidebar');
+      // Desktop: remove toggle buttons and show filters
+      $sidebars.find('.mobile-filter-toggle').remove();
+      $sidebars.find('.well').show();
     }
   }
   
   setupMobileSidebar();
-  $(window).resize(setupMobileSidebar);
+  $(window).on('resize.mobileSidebar', setupMobileSidebar);
 });
 ")),
   
@@ -9897,64 +9911,41 @@ $(document).ready(function() {
     
     /* ===== MOBILE RESPONSIVE SIDEBAR ===== */
     @media (max-width: 768px) {
-      /* Target all sidebars on mobile */
-      .col-sm-4 .well,
-      .sidebar-panel,
-      .well.sidebar-panel,
-      .mobile-sidebar {
-        max-height: 60px !important;
-        overflow: hidden !important;
-        transition: max-height 0.3s ease, opacity 0.3s ease;
-        cursor: pointer !important;
-        position: relative;
-      }
-      
-      /* Add indicator for collapsed state */
-      .col-sm-4 .well:before,
-      .sidebar-panel:before,
-      .well.sidebar-panel:before,
-      .mobile-sidebar:before {
-        content: '▼ Tap to show filters' !important;
+      /* Mobile filter toggle button styling */
+      .mobile-filter-toggle {
         display: block !important;
-        font-weight: 700 !important;
-        color: #c1121f !important;
-        background: rgba(193, 18, 31, 0.1);
+        width: 100%;
+        background-color: #c1121f !important;
+        color: white !important;
+        border: none !important;
+        font-weight: bold !important;
         padding: 15px !important;
-        text-align: center !important;
         font-size: 16px !important;
-        border-radius: 4px;
-        margin: 5px;
+        border-radius: 8px !important;
+        margin-bottom: 10px !important;
+        cursor: pointer !important;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        transition: background-color 0.2s ease;
       }
       
-      /* Expanded state */
-      .col-sm-4 .well.expanded,
-      .sidebar-panel.expanded,
-      .well.sidebar-panel.expanded,
-      .mobile-sidebar.expanded {
-        max-height: 10000px !important;
-        overflow: visible !important;
-        cursor: default !important;
+      .mobile-filter-toggle:hover {
+        background-color: #8b0d17 !important;
       }
       
-      .col-sm-4 .well.expanded:before,
-      .sidebar-panel.expanded:before,
-      .well.sidebar-panel.expanded:before,
-      .mobile-sidebar.expanded:before {
-        content: '▲ Tap to hide filters' !important;
-        background: rgba(193, 18, 31, 0.2);
-      }
-      
-      /* Hide actual filters when collapsed */
-      .col-sm-4 .well:not(.expanded) > *,
-      .sidebar-panel:not(.expanded) > *,
-      .well.sidebar-panel:not(.expanded) > *,
-      .mobile-sidebar:not(.expanded) > * {
-        display: none !important;
+      .mobile-filter-toggle .toggle-icon {
+        font-size: 14px;
+        margin-right: 8px;
       }
       
       /* Main content takes full width on mobile */
       .col-sm-8 {
         width: 100% !important;
+      }
+      
+      /* Ensure sidebar container doesn't mess with layout */
+      .col-sm-4 {
+        width: 100% !important;
+        margin-bottom: 20px;
       }
     }
   ")),
