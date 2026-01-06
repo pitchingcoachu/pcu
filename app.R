@@ -9965,8 +9965,8 @@ $(document).on('click', 'td.clickable-cell, .pitch-count-link', function(e) {
     body.theme-dark .batter-name-rh {
       color: #ffffff !important;
     }
-    body.theme-dark div[style*="color:#000000"],
-    body.theme-dark div[style*="color: #000000"] {
+    body.theme-dark div[style*='color:#000000'],
+    body.theme-dark div[style*='color: #000000'] {
       color: #ffffff !important;
     }
     
