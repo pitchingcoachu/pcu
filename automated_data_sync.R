@@ -36,19 +36,36 @@ ftp_url <- function(path = "") paste0("ftp://", FTP_HOST, path)
 
 list_ftp_files <- function(ftp_path) {
   url <- ftp_url(ftp_path)
-  tryCatch({
-    files <- getURL(
-      url,
-      ftp.use.epsv = FALSE,
-      dirlistonly = TRUE,
-      userpwd = ftp_credentials()
+  max_attempts <- 3
+
+  for (attempt in seq_len(max_attempts)) {
+    handle <- curl::new_handle()
+    curl::handle_setopt(
+      handle,
+      userpwd = ftp_credentials(),
+      ftp_use_epsv = FALSE,
+      dirlistonly = TRUE
     )
-    out <- trimws(strsplit(files, "\n")[[1]])
-    out[nzchar(out)]
-  }, error = function(e) {
-    cat("Error listing files in", ftp_path, ":", e$message, "\n")
-    character(0)
-  })
+
+    result <- tryCatch({
+      resp <- curl::curl_fetch_memory(url, handle = handle)
+      files <- trimws(strsplit(rawToChar(resp$content), "\n", fixed = TRUE)[[1]])
+      files[nzchar(files)]
+    }, error = function(e) e)
+
+    if (!inherits(result, "error")) {
+      return(result)
+    }
+
+    if (attempt == max_attempts) {
+      cat("Error listing files in", ftp_path, ":", result$message, "\n")
+      return(character(0))
+    }
+
+    Sys.sleep(0.25 * attempt)
+  }
+
+  character(0)
 }
 
 within_range <- function(year, month, day) {
