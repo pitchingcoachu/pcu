@@ -6751,7 +6751,7 @@ pitch_ui <- function(show_header = FALSE) {
         selectInput(
           "sessionType", "Session Type:",
           choices = session_type_choices(),
-          selected = "Season"
+          selected = "All"
         ),
         selectInput(
           "withVideo", "With Video:",
@@ -7592,7 +7592,7 @@ mod_hit_server <- function(id, is_active = shiny::reactive(TRUE), global_date_ra
         }
         if ("Session Type" %in% sel) {
           out <- c(out, list(
-            selectInput(ns(paste0("cell_session_", cell_id)), "Session Type:", choices = session_type_choices(), selected = "Season")
+            selectInput(ns(paste0("cell_session_", cell_id)), "Session Type:", choices = session_type_choices(), selected = "All")
           ))
         }
         if ("Pitch Types" %in% sel) {
@@ -10145,7 +10145,7 @@ mod_catch_ui <- function(id, show_header = FALSE) {
     sidebarLayout(
       sidebarPanel(
         # Exact same main sidebar as Pitching, but with Catcher selector
-        selectInput(ns("sessionType"), "Session Type:", choices = session_type_choices(), selected = "Season"),
+        selectInput(ns("sessionType"), "Session Type:", choices = session_type_choices(), selected = "All"),
         selectInput(ns("catcher"), "Select Catcher:", choices = c("All" = "All", catcher_map), selected = "All"),
         selectInput(
           ns("teamType"), "Team:",
@@ -12501,7 +12501,7 @@ mod_leader_ui <- function(id, show_header = FALSE) {
         selectInput(ns("teamType"), "Team:", choices = TEAM_CHOICES, selected = "All"),
         
         # --- Common filters (apply to all domains) ---
-        selectInput(ns("sessionType"), "Session Type:", choices = session_type_choices(), selected = "Season"),
+        selectInput(ns("sessionType"), "Session Type:", choices = session_type_choices(), selected = "All"),
         dateRangeInput(ns("dates"), "Date Range:",
                        start = max(pitch_data$Date, na.rm = TRUE),
                        end   = max(pitch_data$Date, na.rm = TRUE),
@@ -13663,7 +13663,7 @@ mod_comp_ui <- function(id, show_header = FALSE) {
               selectInput(
                 ns("cmpA_sessionType"), "Session Type:",
                 choices  = session_type_choices(),
-                selected = "Season"
+                selected = "All"
               ),
               dateRangeInput(
                 ns("cmpA_dates"), "Date Range:",
@@ -13768,7 +13768,7 @@ mod_comp_ui <- function(id, show_header = FALSE) {
               selectInput(
                 ns("cmpB_sessionType"), "Session Type:",
                 choices  = session_type_choices(),
-                selected = "Season"
+                selected = "All"
               ),
               dateRangeInput(
                 ns("cmpB_dates"), "Date Range:",
@@ -19572,7 +19572,7 @@ player_plans_ui <- function() {
           
           selectInput("pp_session_type", "Session Type:",
                       choices = session_type_choices(),
-                      selected = "Season"),
+                      selected = "All"),
           
           dateRangeInput("pp_date_range", "Date Range:",
                          start = Sys.Date() - 30,
@@ -27057,7 +27057,7 @@ deg_to_clock <- function(x) {
     # pull current filters
     ds <- input$dates[1]; de <- input$dates[2]
     pit <- input$pitcher %or% "All"
-    st  <- input$sessionType %or% "Season"
+    st  <- input$sessionType %or% "All"
     sui <- current_suite()
     pag <- current_page()
     
@@ -27360,7 +27360,7 @@ deg_to_clock <- function(x) {
     # --- context for the note ---
     ds <- input$dates[1]; de <- input$dates[2]
     pit <- input$pitcher     %or% "All"
-    st  <- input$sessionType %or% "Season"
+    st  <- input$sessionType %or% "All"
     sui <- current_suite();  pag <- current_page()
     page_combo <- paste0(sui, "::", pag %or% "")
     
