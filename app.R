@@ -4966,6 +4966,18 @@ usage_by_type <- function(df) {
 library(readr)
 library(stringr)   # explicit, even though tidyverse includes it
 
+# Startup timing checkpoints for deploy-time diagnostics.
+startup_time_origin <- Sys.time()
+startup_time_last <- startup_time_origin
+log_startup_timing <- function(label) {
+  now <- Sys.time()
+  step_secs <- as.numeric(difftime(now, startup_time_last, units = "secs"))
+  total_secs <- as.numeric(difftime(now, startup_time_origin, units = "secs"))
+  message(sprintf("⏱️ [startup] %s | step=%.2fs total=%.2fs", label, step_secs, total_secs))
+  startup_time_last <<- now
+}
+log_startup_timing("Begin data import")
+
 # Point to the app's local data folder (works locally & on shinyapps.io)
 data_parent <- normalizePath(file.path(getwd(), "data"), mustWork = TRUE)
 
@@ -4977,6 +4989,7 @@ all_csvs <- list.files(
   full.names = TRUE
 )
 all_csvs <- all_csvs[ grepl("([/\\\\]practice[/\\\\])|([/\\\\]v3[/\\\\])", tolower(all_csvs)) ]
+log_startup_timing(sprintf("Discovered %d practice/v3 CSV files", length(all_csvs)))
 
 if (!length(all_csvs)) stop("No CSVs found under: ", data_parent)
 
@@ -5253,6 +5266,7 @@ draw_heat <- function(grid, bins = HEAT_BINS, pal_fun = heat_pal_red,
 
 
 pitch_data <- purrr::map_dfr(all_csvs, read_one)
+log_startup_timing(sprintf("Read %d CSV files into pitch_data (%d rows)", length(all_csvs), nrow(pitch_data)))
 
 # Ensure required columns exist since downstream code expects them
 # ------ add to need_cols ------
@@ -5318,6 +5332,7 @@ pitch_data <- pitch_data %>%
   ) %>%
   dplyr::filter(!is.na(TaggedPitchType) & tolower(TaggedPitchType) != "undefined") %>%
   force_pitch_levels()
+log_startup_timing(sprintf("Completed type normalization/filtering (%d rows)", nrow(pitch_data)))
 
 # ---- Attach Cloudinary video URLs when available ----
 video_map_path <- file.path(data_parent, "video_map.csv")
@@ -5395,12 +5410,15 @@ if (length(video_maps) > 0) {
     }
   }
 }
+log_startup_timing("Completed video map merge/attachment")
 
 pitch_data <- ensure_pitch_keys(pitch_data)
+log_startup_timing("Computed/validated PitchKey values")
 rows_before_dedupe <- nrow(pitch_data)
 pitch_data <- deduplicate_pitch_rows(pitch_data)
 rows_after_dedupe <- nrow(pitch_data)
 rows_removed_dedupe <- rows_before_dedupe - rows_after_dedupe
+log_startup_timing(sprintf("Deduplicated pitch rows (removed=%d)", rows_removed_dedupe))
 
 # Friendly load message
 counts <- table(pitch_data$SessionType, useNA = "no")
@@ -5426,6 +5444,7 @@ lookup_table <- if (file.exists("lookup_table.csv")) {
 pitch_data <- dplyr::left_join(pitch_data, lookup_table, by = "Pitcher") %>%
   dplyr::mutate(Email = dplyr::coalesce(Email, Email_lookup)) %>%
   dplyr::select(-Email_lookup)
+log_startup_timing("Joined lookup_table and finalized Email")
 
 
 # (keep your name_map construction the same)
