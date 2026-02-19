@@ -1,0 +1,10 @@
+data/pitch_data_cache_raw.rds
+data/pitch_data_cache_raw.qs
+
+# Data files - keep these for deployment
+# data/v3/*.csv
+# data/practice/*.csv
+data/last_sync.txt
+data/new_data_flag.txt
+data/allowed_campers_clean.csv
+.Renviron
