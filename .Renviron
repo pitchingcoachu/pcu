@@ -1,0 +1,7 @@
+PITCH_MOD_DB_PATH=~/pcu_pitch_dashboard/pitch_modifications.db
+PITCH_MOD_EXPORT_PATH=~/pcu_pitch_dashboard/pitch_type_modifications.csv
+MYSQL_PORT=3306
+MYSQL_USER=pitchingcoachu
+MYSQL_HOST=pitchingcoachu.c3qwye0w6psf.us-west-1.rds.amazonaws.com
+MYSQL_PASSWORD=giqxyx-zoqdos-coqSo1
+MYSQL_DB=pitchingcoachu
