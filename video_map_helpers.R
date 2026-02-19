@@ -479,6 +479,17 @@ video_map_sync_from_neon <- function(map_path = "data/video_map.csv") {
     error = function(e) tibble::tibble()
   )
   existing_norm <- normalize_video_map_df(existing)
+  allow_shrink <- tolower(trimws(Sys.getenv("FORCE_NEON_VIDEO_MAP_SYNC", unset = "false"))) %in% c("1", "true", "yes")
+  existing_n <- nrow(existing_norm)
+  neon_n <- nrow(ordered)
+  if (!allow_shrink && existing_n > 0 && neon_n < existing_n) {
+    message(
+      "Skipping Neon video map overwrite because Neon rows (", neon_n,
+      ") are fewer than local rows (", existing_n,
+      "). Set FORCE_NEON_VIDEO_MAP_SYNC=true to override."
+    )
+    return(FALSE)
+  }
   if (nrow(existing_norm) && identical(existing_norm, ordered)) {
     return(FALSE)
   }
