@@ -11,10 +11,6 @@ Package: MASS
 Source: CRAN
 Version: 7.3-61
 
-Package: RCurl
-Source: CRAN
-Version: 1.98-1.16
-
 Package: akima
 Source: CRAN
 Version: 0.6-3.4
@@ -63,10 +59,6 @@ Package: plotly
 Source: CRAN
 Version: 4.10.4
 
-Package: purrr
-Source: CRAN
-Version: 1.0.2
-
 Package: readr
 Source: CRAN
 Version: 2.1.5
@@ -82,3 +74,39 @@ Version: 1.9.1
 Package: stringr
 Source: CRAN
 Version: 1.5.1
+
+Package: tidyverse
+Source: CRAN
+Version: 2.0.0
+
+Package: shinyjs
+Source: CRAN
+Version: 2.1.0
+
+Package: colourpicker
+Source: CRAN
+Version: 1.3.0
+
+Package: memoise
+Source: CRAN
+Version: 2.0.1
+
+Package: shinymanager
+Source: CRAN
+Version: 1.1.0
+
+Package: DBI
+Source: CRAN
+Version: 1.2.3
+
+Package: RSQLite
+Source: CRAN
+Version: 2.3.7
+
+Package: digest
+Source: CRAN
+Version: 0.6.37
+
+Package: RMariaDB
+Source: CRAN
+Version: 1.3.3
