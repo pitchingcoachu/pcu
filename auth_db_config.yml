@@ -1,0 +1,8 @@
+driver: postgres
+host: ep-blue-forest-afzze9m1-pooler.c-2.us-west-2.aws.neon.tech
+port: 5432
+dbname: neondb
+user: neondb_owner
+password: npg_PDj8F0GLUuhy
+sslmode: require
+channel_binding: require
