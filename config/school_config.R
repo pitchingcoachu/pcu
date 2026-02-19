@@ -2,9 +2,6 @@
 # Copy this file to another repo and keep the same structure when you need to customize colors, logos, APIs, etc.
 school_config <- list(
   team_code = "PCU",
-  # Additional school-code markers used in TrackMan team columns (optional).
-  # These are checked alongside team_code during allowed-player verification.
-  team_code_markers = c("GRA_CAN", "GRAND CANYON", "GCU"),
   # Player filters
   allowed_pitchers = c(
     "Stoller, Cody",
@@ -249,16 +246,14 @@ school_config <- list(
   "Zuber, Tyler",
   "Quattrocchi, Anthony" 
   ),
-  allowed_campers = c(
-    "
-  ),
+  allowed_campers = character(0),
   colors = list(
-    primary             = "#0d1224",   # deep navy used in the dark-mode radial gradient (gcu/app.R:17666-17674)
-    accent              = "#667eea",   # start of the active-tab/btn gradient (gcu/app.R:17464-17515)
-    accent_secondary    = "#764ba2",   # end of that same gradient
-    background          = "#f5f7fa",   # light page background (gcu/app.R:17135)
-    background_secondary= "#e8ecf1"   # the matching secondary background tone
-    
+    primary             = "#000000",   # logo black
+    accent              = "#d71920",   # logo red
+    accent_secondary    = "#8f0f14",   # darker red for gradients/states
+    background          = "#f4f4f4",   # neutral light background
+    background_secondary= "#e5e5e5"    # neutral secondary background
+
   ),
   logo = "PCUlogo.png",
   # Optional: Custom Reports page only (light mode + light PDF) alternate right-side logo.
@@ -267,7 +262,7 @@ school_config <- list(
   coaches_emails = c(
     "ahalverson@pitchingcoachu.com",
     "jchipman@pitchingcoachu.com",
-    "jgaynor@pitchingcoachu.com
+    "jgaynor@pitchingcoachu.com"
   ),
   notes_api = list(
     base_url = "https://script.google.com/macros/s/AKfycbwl9Xfu3N6GtEw8WvOpvgwNx7S3XVR4VDKKmFbRfJtBI3nZWuoFmYk3nNF9oQ682dOX1w/exec",

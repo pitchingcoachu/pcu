@@ -5596,48 +5596,14 @@ ALLOWED_CAMPERS <- school_setting("allowed_campers", c(
 # NEW: normalize for case, spaces, punctuation (so "D.J." == "DJ")
 norm_name_ci <- function(x) gsub("[^a-z]", "", tolower(trimws(as.character(x))))
 
-school_marker_tokens <- function() {
-  extra <- school_setting("team_code_markers", character(0))
-  toks <- unique(toupper(trimws(c(TEAM_CODE, school_display_name, extra))))
-  toks[nzchar(toks)]
-}
-
-row_matches_school_markers <- function(df, cols, tokens = school_marker_tokens()) {
-  cols <- intersect(cols, names(df))
-  if (!length(cols) || !length(tokens) || !nrow(df)) return(rep(FALSE, nrow(df)))
-  out <- rep(FALSE, nrow(df))
-  tokens <- toupper(trimws(as.character(tokens)))
-  tokens <- unique(tokens[nzchar(tokens)])
-  for (col in cols) {
-    vals <- toupper(trimws(as.character(df[[col]])))
-    hit <- vals %in% tokens
-    out <- out | hit
-  }
-  out
-}
-
 live_bp_mask <- function(df) {
   if (!nrow(df)) return(logical(0))
-  is_live <- as.character(df$SessionType) == "Live"
-  p_cols <- intersect(c("PitcherTeam", "PitcherTeamCode", "PitcherTeamForeignID"), names(df))
-  b_cols <- intersect(c("BatterTeam", "BatterTeamCode", "BatterTeamForeignID"), names(df))
-  if (!length(p_cols)) p_cols <- intersect(c("HomeTeam", "AwayTeam", "HomeTeamForeignID", "AwayTeamForeignID"), names(df))
-  if (!length(b_cols)) b_cols <- intersect(c("HomeTeam", "AwayTeam", "HomeTeamForeignID", "AwayTeamForeignID"), names(df))
-  p_mark <- row_matches_school_markers(df, p_cols)
-  b_mark <- row_matches_school_markers(df, b_cols)
-  is_live & p_mark & b_mark
+  as.character(df$SessionType) == "Live"
 }
 
 season_mask <- function(df) {
   if (!nrow(df)) return(logical(0))
-  is_live <- as.character(df$SessionType) == "Live"
-  p_cols <- intersect(c("PitcherTeam", "PitcherTeamCode", "PitcherTeamForeignID"), names(df))
-  b_cols <- intersect(c("BatterTeam", "BatterTeamCode", "BatterTeamForeignID"), names(df))
-  if (!length(p_cols)) p_cols <- intersect(c("HomeTeam", "AwayTeam", "HomeTeamForeignID", "AwayTeamForeignID"), names(df))
-  if (!length(b_cols)) b_cols <- intersect(c("HomeTeam", "AwayTeam", "HomeTeamForeignID", "AwayTeamForeignID"), names(df))
-  p_mark <- row_matches_school_markers(df, p_cols)
-  b_mark <- row_matches_school_markers(df, b_cols)
-  is_live & xor(p_mark, b_mark)
+  as.character(df$SessionType) == "Live"
 }
 
 normalize_session_filter_value <- function(session_value) {
@@ -5668,69 +5634,7 @@ session_type_choices <- function() {
   c("Season", "Bullpen", "Live BP" = "Live", "All")
 }
 
-verify_allowed_players_by_school <- function(df, player_col, allowed_names, label = "players") {
-  allowed_names <- unique(as.character(allowed_names))
-  allowed_names <- allowed_names[nzchar(trimws(allowed_names))]
-  if (!length(allowed_names)) return(allowed_names)
-  if (!player_col %in% names(df)) return(character(0))
-
-  marker_cols <- intersect(c(
-    "PitcherTeam", "BatterTeam", "CatcherTeam",
-    "HomeTeam", "AwayTeam",
-    "HomeTeamForeignID", "AwayTeamForeignID", "GameForeignID"
-  ), names(df))
-  if (!length(marker_cols)) {
-    message("No team marker columns found for ", label, " verification; keeping configured list as-is.")
-    return(allowed_names)
-  }
-
-  tokens <- school_marker_tokens()
-  if (!length(tokens)) {
-    message("No school marker tokens configured; keeping configured ", label, " list as-is.")
-    return(allowed_names)
-  }
-
-  allowed_norm <- unique(norm_name_ci(allowed_names))
-  dat <- df %>%
-    dplyr::mutate(.player_norm = norm_name_ci(.data[[player_col]])) %>%
-    dplyr::filter(.player_norm %in% allowed_norm)
-  if (!nrow(dat)) return(character(0))
-
-  row_has_school <- rep(FALSE, nrow(dat))
-  tokens <- toupper(trimws(as.character(tokens)))
-  tokens <- unique(tokens[nzchar(tokens)])
-  for (col in marker_cols) {
-    vals <- toupper(trimws(as.character(dat[[col]])))
-    col_has <- vals %in% tokens
-    row_has_school <- row_has_school | col_has
-  }
-
-  verified_norm <- unique(dat$.player_norm[row_has_school])
-  verified <- allowed_names[norm_name_ci(allowed_names) %in% verified_norm]
-  verified <- unique(verified)
-
-  dropped <- setdiff(allowed_names, verified)
-  if (length(dropped)) {
-    message(
-      "School-code verification removed ", length(dropped),
-      " configured ", label, " with no matching school marker rows."
-    )
-  }
-  verified
-}
-
-# Enforce team-code evidence for configured school player lists.
-verification_pool_v3 <- pitch_data %>%
-  dplyr::filter(
-    SessionType == "Live" |
-      grepl("[/\\\\]v3[/\\\\]", tolower(as.character(SourceFile)))
-  )
-ALLOWED_PITCHERS <- verify_allowed_players_by_school(
-  verification_pool_v3, player_col = "Pitcher", allowed_names = ALLOWED_PITCHERS, label = "pitchers"
-)
-ALLOWED_HITTERS <- verify_allowed_players_by_school(
-  verification_pool_v3, player_col = "Batter", allowed_names = ALLOWED_HITTERS, label = "hitters"
-)
+# Marker-based school verification removed: keep configured allowed player lists as-is.
 
 # Keep the full dataset for Hitting & global refs
 # but build a PITCHING-ONLY copy that is filtered to the whitelist
