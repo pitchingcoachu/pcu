@@ -1,0 +1,53 @@
+# requirements.R
+# Install required packages for VMI Baseball Analytics Shiny App
+
+# Function to install packages if not already installed
+install_if_missing <- function(packages) {
+  for (pkg in packages) {
+    if (!requireNamespace(pkg, quietly = TRUE)) {
+      cat("Installing package:", pkg, "\n")
+      install.packages(pkg, dependencies = TRUE)
+    } else {
+      cat("Package already installed:", pkg, "\n")
+    }
+  }
+}
+
+# List of required packages
+required_packages <- c(
+  "shiny",
+  "shinyjs",
+  "dplyr",
+  "ggplot2",
+  "purrr",
+  "DT",
+  "gridExtra",
+  "patchwork",
+  "rsconnect",
+  "hexbin",
+  "ggiraph",
+  "httr2",
+  "MASS",
+  "curl",
+  "RCurl",
+  "readr",
+  "lubridate",
+  "stringr",
+  "akima",
+  "plotly",
+  "jsonlite",
+  "digest",
+  "colourpicker",
+  "memoise",
+  "shinymanager",
+  "DBI",
+  "RSQLite",
+  "RMariaDB",
+  "RPostgres"
+)
+
+
+# Install packages
+cat("Installing required packages for VMI Baseball Analytics...\n")
+install_if_missing(required_packages)
+cat("All packages installed successfully!\n")
