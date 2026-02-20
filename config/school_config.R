@@ -4,7 +4,8 @@ school_config <- list(
   team_code = "PCU",
   # Player filters
   allowed_pitchers = c(
-    "Stoller, Cody",
+  "Stoller, Cody",
+  "Levine, Will",
   "Barnes, Jon",
   "Giles, Ken",
   "Dillard, Trey",
