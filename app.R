@@ -1052,301 +1052,6 @@ get_pitch_mod_postgres_config <- function() {
   )
 }
 
-get_pitch_data_postgres_config <- function() {
-  url <- Sys.getenv("PITCH_DATA_DB_URL", "")
-  if (nzchar(url)) {
-    parsed <- parse_pitch_mod_postgres_uri(url)
-    if (!is.null(parsed)) return(parsed)
-  }
-
-  host <- Sys.getenv("PITCH_DATA_DB_HOST", "")
-  user <- Sys.getenv("PITCH_DATA_DB_USER", "")
-  password <- Sys.getenv("PITCH_DATA_DB_PASSWORD", "")
-  dbname <- Sys.getenv("PITCH_DATA_DB_NAME", "")
-  port <- suppressWarnings(as.integer(Sys.getenv("PITCH_DATA_DB_PORT", "")))
-  sslmode <- Sys.getenv("PITCH_DATA_DB_SSLMODE", "require")
-  channel_binding <- Sys.getenv("PITCH_DATA_DB_CHANNEL_BINDING", "require")
-  if (nzchar(host) && nzchar(user) && nzchar(password) && nzchar(dbname)) {
-    if (is.na(port) || port <= 0) port <- 5432
-    return(list(
-      host = host,
-      port = port,
-      user = user,
-      password = password,
-      dbname = dbname,
-      sslmode = sslmode,
-      channel_binding = channel_binding
-    ))
-  }
-
-  config_path <- Sys.getenv("PITCH_DATA_DB_CONFIG", Sys.getenv("PITCH_MOD_DB_CONFIG", "auth_db_config.yml"))
-  cfg <- read_pitch_mod_db_config(config_path)
-  if (is.null(cfg)) return(NULL)
-  driver <- tolower(cfg$driver %||% "")
-  if (!driver %in% c("postgres", "postgresql", "neon")) return(NULL)
-  port_val <- suppressWarnings(as.integer(cfg$port %||% "5432"))
-  if (is.na(port_val) || port_val <= 0) port_val <- 5432
-
-  list(
-    host = cfg$host %||% "",
-    port = port_val,
-    user = cfg$user %||% "",
-    password = cfg$password %||% "",
-    dbname = cfg$dbname %||% "",
-    sslmode = cfg$sslmode %||% "require",
-    channel_binding = cfg$channel_binding %||% "require"
-  )
-}
-
-pitch_data_db_connect <- function() {
-  cfg <- get_pitch_data_postgres_config()
-  if (is.null(cfg)) return(NULL)
-  if (!requireNamespace("RPostgres", quietly = TRUE)) {
-    message("RPostgres is required for Neon-backed pitch_data loading.")
-    return(NULL)
-  }
-  params <- list(
-    host = cfg$host,
-    port = cfg$port %||% 5432,
-    user = cfg$user,
-    password = cfg$password,
-    dbname = cfg$dbname,
-    sslmode = cfg$sslmode %||% "require"
-  )
-  if (nzchar(cfg$channel_binding %||% "")) {
-    params$channel_binding <- cfg$channel_binding
-  }
-  tryCatch(
-    do.call(DBI::dbConnect, c(list(RPostgres::Postgres()), params)),
-    error = function(e) {
-      message("Unable to connect to Neon pitch data backend: ", e$message)
-      NULL
-    }
-  )
-}
-
-pitch_data_table_name <- function() {
-  tbl <- Sys.getenv("PITCH_DATA_DB_TABLE", "pitch_events")
-  tbl <- gsub("[^A-Za-z0-9_]", "_", tbl, perl = TRUE)
-  if (!nzchar(tbl)) tbl <- "pitch_events"
-  tbl
-}
-
-pitch_data_table_ref <- function() {
-  schema <- Sys.getenv("PITCH_DATA_DB_SCHEMA", "")
-  table <- pitch_data_table_name()
-  if (nzchar(schema)) {
-    DBI::Id(schema = schema, table = table)
-  } else {
-    DBI::Id(table = table)
-  }
-}
-
-fetch_pitch_data_neon <- function() {
-  con <- pitch_data_db_connect()
-  if (is.null(con)) return(NULL)
-  on.exit(tryCatch(DBI::dbDisconnect(con), error = function(e) NULL), add = TRUE)
-
-  tbl_ref <- pitch_data_table_ref()
-  table_exists <- tryCatch(DBI::dbExistsTable(con, tbl_ref), error = function(e) FALSE)
-  if (!isTRUE(table_exists)) {
-    schema <- Sys.getenv("PITCH_DATA_DB_SCHEMA", "")
-    table_label <- if (nzchar(schema)) paste0(schema, ".", pitch_data_table_name()) else pitch_data_table_name()
-    message("Neon pitch table not found: ", table_label)
-    return(NULL)
-  }
-
-  fields <- tryCatch(DBI::dbListFields(con, tbl_ref), error = function(e) character(0))
-  lower_fields <- tolower(fields)
-  has_pitch_date <- "pitch_date" %in% lower_fields
-  max_days <- suppressWarnings(as.integer(Sys.getenv("PITCH_DATA_MAX_DAYS", "0")))
-  max_rows <- suppressWarnings(as.integer(Sys.getenv("PITCH_DATA_DB_LIMIT", "0")))
-
-  tbl_sql <- DBI::dbQuoteIdentifier(con, tbl_ref)
-  where_sql <- ""
-  if (isTRUE(has_pitch_date) && is.finite(max_days) && max_days > 0) {
-    pitch_date_col <- fields[match("pitch_date", lower_fields)]
-    col_sql <- DBI::dbQuoteIdentifier(con, pitch_date_col)
-    where_sql <- sprintf(" WHERE %s >= CURRENT_DATE - INTERVAL '%d days'", col_sql, max_days)
-  }
-
-  limit_sql <- ""
-  if (is.finite(max_rows) && max_rows > 0) {
-    limit_sql <- sprintf(" LIMIT %d", max_rows)
-  }
-
-  sql <- sprintf("SELECT * FROM %s%s%s", tbl_sql, where_sql, limit_sql)
-  df <- tryCatch(DBI::dbGetQuery(con, sql), error = function(e) {
-    message("Neon pitch query failed: ", e$message)
-    NULL
-  })
-  if (is.null(df)) return(NULL)
-
-  if (!"SourceFile" %in% names(df)) {
-    df$SourceFile <- sprintf("neon:%s", pitch_data_table_name())
-  }
-  df
-}
-
-build_pitch_data_field_map <- function(fields) {
-  out <- setNames(as.list(fields), tolower(fields))
-  out
-}
-
-get_pitch_data_field_name <- function(field_map, candidate) {
-  field_map[[tolower(candidate)]] %||% NA_character_
-}
-
-quote_sql_values <- function(con, values) {
-  vals <- values[!is.na(values) & nzchar(as.character(values))]
-  if (!length(vals)) return(NULL)
-  paste(vapply(vals, function(v) as.character(DBI::dbQuoteLiteral(con, as.character(v))), character(1)), collapse = ", ")
-}
-
-fetch_pitch_data_neon_filtered <- local({
-  cached_query <- memoise::memoise(function(
-    date_start, date_end, session_sel, pitcher_sel, batter_sel,
-    pitcher_hand_sel, batter_side_sel, pitch_types_csv, team_type_sel
-  ) {
-    con <- pitch_data_db_connect()
-    if (is.null(con)) return(NULL)
-    on.exit(tryCatch(DBI::dbDisconnect(con), error = function(e) NULL), add = TRUE)
-
-    tbl_ref <- pitch_data_table_ref()
-    if (!isTRUE(tryCatch(DBI::dbExistsTable(con, tbl_ref), error = function(e) FALSE))) return(NULL)
-
-    fields <- tryCatch(DBI::dbListFields(con, tbl_ref), error = function(e) character(0))
-    if (!length(fields)) return(NULL)
-    field_map <- build_pitch_data_field_map(fields)
-
-    tbl_sql <- DBI::dbQuoteIdentifier(con, tbl_ref)
-    where <- character(0)
-
-    col_pitch_date <- get_pitch_data_field_name(field_map, "pitch_date")
-    col_date <- get_pitch_data_field_name(field_map, "Date")
-    if (nzchar(date_start) && nzchar(date_end)) {
-      if (!is.na(col_pitch_date)) {
-        date_sql <- DBI::dbQuoteIdentifier(con, col_pitch_date)
-        where <- c(
-          where,
-          sprintf(
-            "%s >= %s::date AND %s <= %s::date",
-            date_sql, DBI::dbQuoteLiteral(con, date_start),
-            date_sql, DBI::dbQuoteLiteral(con, date_end)
-          )
-        )
-      } else if (!is.na(col_date)) {
-        date_sql <- DBI::dbQuoteIdentifier(con, col_date)
-        where <- c(
-          where,
-          sprintf(
-            "TO_DATE(%s, 'YYYY-MM-DD') >= %s::date AND TO_DATE(%s, 'YYYY-MM-DD') <= %s::date",
-            date_sql, DBI::dbQuoteLiteral(con, date_start),
-            date_sql, DBI::dbQuoteLiteral(con, date_end)
-          )
-        )
-      }
-    }
-
-    session_norm <- normalize_session_filter_value(session_sel)
-    col_session <- get_pitch_data_field_name(field_map, "SessionType")
-    if (!is.na(col_session) && !identical(session_norm, "All") && !is.na(session_norm)) {
-      session_sql <- DBI::dbQuoteIdentifier(con, col_session)
-      if (identical(session_norm, "Season") || identical(session_norm, "Live")) {
-        where <- c(where, sprintf("%s = 'Live'", session_sql))
-      } else if (identical(session_norm, "Bullpen")) {
-        where <- c(where, sprintf("%s = 'Bullpen'", session_sql))
-      }
-    }
-
-    col_pitcher <- get_pitch_data_field_name(field_map, "Pitcher")
-    if (!is.na(col_pitcher) && nzchar(pitcher_sel) && pitcher_sel != "All" && pitcher_sel != "No data") {
-      where <- c(where, sprintf(
-        "%s = %s",
-        DBI::dbQuoteIdentifier(con, col_pitcher),
-        DBI::dbQuoteLiteral(con, pitcher_sel)
-      ))
-    }
-
-    col_batter <- get_pitch_data_field_name(field_map, "Batter")
-    if (!is.na(col_batter) && nzchar(batter_sel) && batter_sel != "All") {
-      where <- c(where, sprintf(
-        "%s = %s",
-        DBI::dbQuoteIdentifier(con, col_batter),
-        DBI::dbQuoteLiteral(con, batter_sel)
-      ))
-    }
-
-    col_throw <- get_pitch_data_field_name(field_map, "PitcherThrows")
-    if (!is.na(col_throw) && nzchar(pitcher_hand_sel) && pitcher_hand_sel != "All") {
-      where <- c(where, sprintf(
-        "%s = %s",
-        DBI::dbQuoteIdentifier(con, col_throw),
-        DBI::dbQuoteLiteral(con, pitcher_hand_sel)
-      ))
-    }
-
-    col_batter_side <- get_pitch_data_field_name(field_map, "BatterSide")
-    if (!is.na(col_batter_side) && !is.na(col_session) && nzchar(batter_side_sel) && batter_side_sel != "All") {
-      where <- c(
-        where,
-        sprintf(
-          "(%s <> 'Live' OR (%s = 'Live' AND %s = %s))",
-          DBI::dbQuoteIdentifier(con, col_session),
-          DBI::dbQuoteIdentifier(con, col_session),
-          DBI::dbQuoteIdentifier(con, col_batter_side),
-          DBI::dbQuoteLiteral(con, batter_side_sel)
-        )
-      )
-    }
-
-    pitch_types <- unlist(strsplit(pitch_types_csv, "\\|", fixed = FALSE), use.names = FALSE)
-    pitch_types <- trimws(pitch_types)
-    pitch_types <- pitch_types[nzchar(pitch_types) & pitch_types != "All"]
-    col_pitch_type <- get_pitch_data_field_name(field_map, "TaggedPitchType")
-    if (!is.na(col_pitch_type) && length(pitch_types)) {
-      in_vals <- quote_sql_values(con, unique(pitch_types))
-      if (!is.null(in_vals)) {
-        where <- c(where, sprintf("%s IN (%s)", DBI::dbQuoteIdentifier(con, col_pitch_type), in_vals))
-      }
-    }
-
-    if (!is.na(col_pitcher) && identical(team_type_sel, "Campers")) {
-      campers_vals <- quote_sql_values(con, unique(as.character(ALLOWED_CAMPERS)))
-      if (!is.null(campers_vals)) {
-        where <- c(where, sprintf("%s IN (%s)", DBI::dbQuoteIdentifier(con, col_pitcher), campers_vals))
-      }
-    }
-
-    where_sql <- if (length(where)) paste(" WHERE", paste(where, collapse = " AND ")) else ""
-    sql <- sprintf("SELECT * FROM %s%s", tbl_sql, where_sql)
-    df <- tryCatch(DBI::dbGetQuery(con, sql), error = function(e) NULL)
-    if (is.null(df)) return(NULL)
-    if (!"SourceFile" %in% names(df)) df$SourceFile <- sprintf("neon:%s", pitch_data_table_name())
-    df
-  })
-
-  function(filters = list()) {
-    date_start <- as.character(filters$date_start %||% "")
-    date_end <- as.character(filters$date_end %||% "")
-    pitch_types <- filters$pitch_types %||% "All"
-    if (!length(pitch_types)) pitch_types <- "All"
-    pitch_types_csv <- paste(sort(unique(as.character(pitch_types))), collapse = "|")
-
-    cached_query(
-      date_start = date_start,
-      date_end = date_end,
-      session_sel = as.character(filters$session %||% "All"),
-      pitcher_sel = as.character(filters$pitcher %||% ""),
-      batter_sel = as.character(filters$batter %||% ""),
-      pitcher_hand_sel = as.character(filters$pitcher_hand %||% "All"),
-      batter_side_sel = as.character(filters$batter_side %||% "All"),
-      pitch_types_csv = pitch_types_csv,
-      team_type_sel = as.character(filters$team_type %||% "All")
-    )
-  }
-})
-
 pitch_mod_backend_cfg <- local({
   config <- get_pitch_mod_postgres_config()
   if (!is.null(config) && nzchar(config$host) && nzchar(config$dbname) &&
@@ -5540,8 +5245,20 @@ log_startup_timing <- function(label) {
 }
 log_startup_timing("Begin data import")
 
-# Point to the app's local data folder (fallback mode)
-data_parent <- normalizePath(file.path(getwd(), "data"), mustWork = FALSE)
+# Point to the app's local data folder (works locally & on shinyapps.io)
+data_parent <- normalizePath(file.path(getwd(), "data"), mustWork = TRUE)
+
+# Find every CSV under data/, keep only those under practice/ or V3/
+all_csvs <- list.files(
+  path       = data_parent,
+  pattern    = "\\.csv$",
+  recursive  = TRUE,
+  full.names = TRUE
+)
+all_csvs <- all_csvs[ grepl("([/\\\\]practice[/\\\\])|([/\\\\]v3[/\\\\])", tolower(all_csvs)) ]
+log_startup_timing(sprintf("Discovered %d practice/v3 CSV files", length(all_csvs)))
+
+if (!length(all_csvs)) stop("No CSVs found under: ", data_parent)
 
 # Map folder → SessionType
 infer_session_from_path <- function(fp) {
@@ -5815,23 +5532,12 @@ draw_heat <- function(grid, bins = HEAT_BINS, pal_fun = heat_pal_red,
 }
 
 
-# Neon-only pitch data loading (no data/practice or data/v3 fallback)
-pitch_data <- fetch_pitch_data_neon()
-if (is.null(pitch_data)) {
-  warning(
-    paste0(
-      "Unable to load pitch data from Neon at startup. ",
-      "Starting with empty pitch dataset. Check PITCH_DATA_DB_* env vars and table ",
-      pitch_data_table_name(),
-      "."
-    )
-  )
-  pitch_data <- data.frame(stringsAsFactors = FALSE)
-}
-log_startup_timing(sprintf("Loaded %d rows from Neon pitch table", nrow(pitch_data)))
+pitch_data <- purrr::map_dfr(all_csvs, read_one)
+log_startup_timing(sprintf("Read %d CSV files into pitch_data (%d rows)", length(all_csvs), nrow(pitch_data)))
 
 # Ensure required columns exist since downstream code expects them
-PITCH_DATA_REQUIRED_COLS <- c(
+# ------ add to need_cols ------
+need_cols <- c(
   "Date","Pitcher","Email","PitcherThrows","TaggedPitchType",
   "InducedVertBreak","HorzBreak","RelSpeed","ReleaseTilt","BreakTilt",
   "SpinEfficiency","SpinRate","RelHeight","RelSide","Extension",
@@ -5843,57 +5549,56 @@ PITCH_DATA_REQUIRED_COLS <- c(
   "VideoClip","VideoClip2","VideoClip3"
 )
 
-normalize_pitch_data_frame <- function(df) {
-  if (is.null(df)) return(df)
-  for (nm in PITCH_DATA_REQUIRED_COLS) if (!nm %in% names(df)) df[[nm]] <- NA_character_
 
-  df %>%
-    mutate(
-      Date            = parse_date_mdy(Date),
-      Pitcher         = as.character(Pitcher),
-      Email           = as.character(Email),
-      PitcherThrows   = as.character(PitcherThrows),
-      TaggedPitchType = trimws(as.character(TaggedPitchType)),
-      InducedVertBreak= as.numeric(InducedVertBreak),
-      HorzBreak       = as.numeric(HorzBreak),
-      RelSpeed        = as.numeric(RelSpeed),
-      ReleaseTilt     = as.numeric(ReleaseTilt),
-      BreakTilt       = as.numeric(BreakTilt),
-      SpinEfficiency  = as.numeric(SpinEfficiency),
-      SpinRate        = as.numeric(SpinRate),
-      RelHeight       = as.numeric(RelHeight),
-      RelSide         = as.numeric(RelSide),
-      VertApprAngle   = as.numeric(VertApprAngle),
-      HorzApprAngle   = as.numeric(HorzApprAngle),
-      PlateLocSide    = as.numeric(PlateLocSide),
-      PlateLocHeight  = as.numeric(PlateLocHeight),
-      Extension       = as.numeric(Extension),
-      ExitSpeed       = as.numeric(ExitSpeed),
-      Angle           = as.numeric(Angle),
-      BatterSide      = as.character(BatterSide),
-      PlayResult      = as.character(PlayResult),
-      Batter          = as.character(Batter),
-      Catcher         = as.character(Catcher),
-      SessionType = factor(
-        dplyr::case_when(
-          grepl("bull|prac", tolower(as.character(SessionType))) ~ "Bullpen",
-          grepl("live|game|ab", tolower(as.character(SessionType))) ~ "Live",
-          grepl("[/\\\\]practice[/\\\\]", tolower(SourceFile)) ~ "Bullpen",
-          grepl("[/\\\\]v3[/\\\\]",       tolower(SourceFile)) ~ "Live",
-          TRUE ~ NA_character_
-        ),
-        levels = c("Bullpen","Live")
+
+for (nm in need_cols) if (!nm %in% names(pitch_data)) pitch_data[[nm]] <- NA_character_
+
+# Type cleanup + standardization (now safe to coerce)
+pitch_data <- pitch_data %>%
+  mutate(
+    Date            = parse_date_mdy(Date),
+    Pitcher         = as.character(Pitcher),
+    Email           = as.character(Email),
+    PitcherThrows   = as.character(PitcherThrows),
+    TaggedPitchType = trimws(as.character(TaggedPitchType)),
+    InducedVertBreak= as.numeric(InducedVertBreak),
+    HorzBreak       = as.numeric(HorzBreak),
+    RelSpeed        = as.numeric(RelSpeed),
+    ReleaseTilt     = as.numeric(ReleaseTilt),
+    BreakTilt       = as.numeric(BreakTilt),
+    SpinEfficiency  = as.numeric(SpinEfficiency),
+    SpinRate        = as.numeric(SpinRate),
+    RelHeight       = as.numeric(RelHeight),
+    RelSide         = as.numeric(RelSide),
+    VertApprAngle   = as.numeric(VertApprAngle),
+    HorzApprAngle   = as.numeric(HorzApprAngle),
+    PlateLocSide    = as.numeric(PlateLocSide),
+    PlateLocHeight  = as.numeric(PlateLocHeight),
+    Extension       = as.numeric(Extension),
+    ExitSpeed       = as.numeric(ExitSpeed),   # ← NEW
+    Angle           = as.numeric(Angle),       # ← NEW
+    BatterSide      = as.character(BatterSide), # ← NEW
+    PlayResult      = as.character(PlayResult),
+    Batter         = as.character(Batter),
+    Catcher = as.character(Catcher),
+    SessionType = factor(
+      dplyr::case_when(
+        grepl("bull|prac", tolower(as.character(SessionType))) ~ "Bullpen",
+        grepl("live|game|ab", tolower(as.character(SessionType))) ~ "Live",
+        grepl("[/\\\\]practice[/\\\\]", tolower(SourceFile)) ~ "Bullpen",  # fallback: folder
+        grepl("[/\\\\]v3[/\\\\]",       tolower(SourceFile)) ~ "Live",
+        TRUE ~ NA_character_
       ),
-      KorBB           = as.character(KorBB),
-      Balls           = as.numeric(Balls),
-      Strikes         = as.numeric(Strikes),
-      TaggedPitchType = ifelse(TaggedPitchType == "FourSeamFastBall", "Fastball", TaggedPitchType)
-    ) %>%
-    dplyr::filter(!is.na(TaggedPitchType) & tolower(TaggedPitchType) != "undefined") %>%
-    force_pitch_levels()
-}
-
-pitch_data <- normalize_pitch_data_frame(pitch_data)
+      levels = c("Bullpen","Live")
+    ),
+    KorBB           = as.character(KorBB),
+    Balls           = as.numeric(Balls),
+    Strikes         = as.numeric(Strikes),
+    # Convert FourSeamFastBall to Fastball
+    TaggedPitchType = ifelse(TaggedPitchType == "FourSeamFastBall", "Fastball", TaggedPitchType)
+  ) %>%
+  dplyr::filter(!is.na(TaggedPitchType) & tolower(TaggedPitchType) != "undefined") %>%
+  force_pitch_levels()
 log_startup_timing(sprintf("Completed type normalization/filtering (%d rows)", nrow(pitch_data)))
 
 # ---- Attach Cloudinary video URLs when available ----
@@ -5905,22 +5610,14 @@ if (!"VideoClip3" %in% names(pitch_data)) pitch_data$VideoClip3 <- NA_character_
 
 # Combine EdgeR and manual/iPhone video maps
 video_maps <- list()
-prefer_neon_video_map <- tolower(trimws(Sys.getenv("VIDEO_MAP_NEON_FIRST", "true"))) %in% c("1", "true", "yes")
-if (prefer_neon_video_map) {
-  neon_map <- tryCatch(video_map_read_all_neon(), error = function(e) tibble::tibble())
-  if (nrow(neon_map) > 0) {
-    video_maps[["neon"]] <- neon_map
-    message("📹 Loaded ", nrow(neon_map), " videos from Neon video_map table")
-  }
-}
-if (!length(video_maps) && file.exists(video_map_path)) {
+if (file.exists(video_map_path)) {
   edger_raw <- suppressMessages(readr::read_csv(video_map_path, show_col_types = FALSE))
   if (nrow(edger_raw) > 0) {
     video_maps[["edger"]] <- edger_raw
     message("📹 Loaded ", nrow(edger_raw), " EdgeR videos")
   }
 }
-if (!length(video_maps) && file.exists(manual_map_path)) {
+if (file.exists(manual_map_path)) {
   manual_raw <- suppressMessages(readr::read_csv(manual_map_path, show_col_types = FALSE))
   if (nrow(manual_raw) > 0) {
     video_maps[["manual"]] <- manual_raw
@@ -5985,31 +5682,18 @@ log_startup_timing("Completed video map merge/attachment")
 pitch_data <- ensure_pitch_keys(pitch_data)
 log_startup_timing("Computed/validated PitchKey values")
 rows_before_dedupe <- nrow(pitch_data)
-dedupe_max_rows <- suppressWarnings(as.integer(Sys.getenv("STARTUP_DEDUP_MAX_ROWS", "150000")))
-if (!is.finite(dedupe_max_rows)) dedupe_max_rows <- 150000
-if (dedupe_max_rows > 0 && rows_before_dedupe > dedupe_max_rows) {
-  rows_after_dedupe <- rows_before_dedupe
-  rows_removed_dedupe <- 0L
-  message(
-    "Skipping startup deduplication because row count (", rows_before_dedupe,
-    ") exceeds STARTUP_DEDUP_MAX_ROWS=", dedupe_max_rows,
-    ". Set STARTUP_DEDUP_MAX_ROWS=0 to force dedupe."
-  )
-  log_startup_timing("Skipped startup deduplication")
-} else {
-  pitch_data <- deduplicate_pitch_rows(pitch_data)
-  rows_after_dedupe <- nrow(pitch_data)
-  rows_removed_dedupe <- rows_before_dedupe - rows_after_dedupe
-  log_startup_timing(sprintf("Deduplicated pitch rows (removed=%d)", rows_removed_dedupe))
-}
+pitch_data <- deduplicate_pitch_rows(pitch_data)
+rows_after_dedupe <- nrow(pitch_data)
+rows_removed_dedupe <- rows_before_dedupe - rows_after_dedupe
+log_startup_timing(sprintf("Deduplicated pitch rows (removed=%d)", rows_removed_dedupe))
 
 # Friendly load message
 counts <- table(pitch_data$SessionType, useNA = "no")
 bcount <- if ("Bullpen" %in% names(counts)) counts[["Bullpen"]] else 0
 lcount <- if ("Live"    %in% names(counts)) counts[["Live"]]    else 0
-message("Loaded ", nrow(pitch_data), " rows from Neon table ",
-        pitch_data_table_name(),
-        " | Bullpen: ", bcount, " | Live: ", lcount)
+message("Loaded ", nrow(pitch_data), " rows from ", length(all_csvs),
+        " files | Bullpen: ", bcount, " | Live: ", lcount,
+        " | root: ", data_parent)
 if (rows_removed_dedupe > 0) {
   message("Removed ", rows_removed_dedupe, " duplicate pitch rows by PitchKey during load.")
 }
@@ -6018,14 +5702,7 @@ if (rows_removed_dedupe > 0) {
 # Read lookup table and keep Email in a separate column to avoid .x/.y
 lookup_table <- if (file.exists("lookup_table.csv")) {
   read.csv("lookup_table.csv", stringsAsFactors = FALSE) %>%
-    dplyr::rename(Pitcher = PlayerName, Email_lookup = Email) %>%
-    dplyr::mutate(
-      Pitcher = trimws(as.character(Pitcher)),
-      Email_lookup = trimws(as.character(Email_lookup))
-    ) %>%
-    dplyr::filter(!is.na(Pitcher), nzchar(Pitcher)) %>%
-    dplyr::arrange(dplyr::desc(!is.na(Email_lookup) & nzchar(Email_lookup))) %>%
-    dplyr::distinct(Pitcher, .keep_all = TRUE)
+    dplyr::rename(Pitcher = PlayerName, Email_lookup = Email)
 } else {
   data.frame(Pitcher = character(), Email_lookup = character(), stringsAsFactors = FALSE)
 }
@@ -27821,7 +27498,6 @@ deg_to_clock <- function(x) {
   
   # Reactive value to track modification statistics
   modification_stats <- reactiveVal(list(applied_count = 0, total_modifications = 0))
-  modified_pitch_data(pitch_data_pitching)
   
   # Function to load modifications with feedback
   load_modifications <- function(force_reload = FALSE, verbose = TRUE) {
@@ -27865,11 +27541,8 @@ deg_to_clock <- function(x) {
     }
   }
   
-  # Load modifications once on startup (can be disabled via env if needed).
-load_mods_on_startup <- tolower(trimws(Sys.getenv("LOAD_MODIFICATIONS_ON_STARTUP", "false"))) %in% c("1", "true", "yes")
-  if (load_mods_on_startup) {
-    load_modifications(force_reload = FALSE, verbose = TRUE)
-  }
+  # Load modifications on startup
+  load_modifications(force_reload = FALSE, verbose = TRUE)
   
   # Add a reactive timer to check for data updates every 30 seconds
   autoCheck <- reactiveTimer(30000)  # 30 seconds
@@ -28780,7 +28453,7 @@ load_mods_on_startup <- tolower(trimws(Sys.getenv("LOAD_MODIFICATIONS_ON_STARTUP
     manual_velocity_entries(updated)
     save_manual_velocity_entries(updated)
 
-    manual_velo_status(sprintf("Saved %d entry%s.", length(vals), ifelse(length(vals) == 1, "", "ies")))
+    manual_velo_status(sprintf("Saved %d %s.", length(vals), ifelse(length(vals) == 1, "entry", "entries")))
     updateNumericInput(session, "manualVeloSingle", value = NA_real_)
     updateTextAreaInput(session, "manualVeloBatch", value = "")
     if (identical(throw_type, "Plyo Velo")) {
@@ -28974,36 +28647,9 @@ load_mods_on_startup <- tolower(trimws(Sys.getenv("LOAD_MODIFICATIONS_ON_STARTUP
     if (!is_valid_dates(input$dates)) return(modified_pitch_data()[0, , drop = FALSE])
     
     pitch_types <- if (is.null(input$pitchType) || !length(input$pitchType)) "All" else input$pitchType
-
-    base_df <- fetch_pitch_data_neon_filtered(list(
-      date_start = input$dates[1],
-      date_end = input$dates[2],
-      session = input$sessionType,
-      pitcher = input$pitcher,
-      batter = input$oppHitter,
-      pitcher_hand = input$hand,
-      batter_side = input$batterSide,
-      pitch_types = "All",
-      team_type = input$teamType
-    ))
-    if (is.null(base_df)) {
-      base_df <- modified_pitch_data()
-    }
-    base_df <- normalize_pitch_data_frame(base_df)
-    base_df <- ensure_pitch_keys(base_df)
-
-    # Apply cached modifications without reloading from DB on every reactive run.
-    source_df <- tryCatch(modified_pitch_data(), error = function(e) NULL)
-    if (is.null(source_df) || !nrow(source_df)) source_df <- pitch_data_pitching
-    source_df <- ensure_pitch_keys(normalize_pitch_data_frame(source_df))
-    if ("PitchKey" %in% names(source_df) && "PitchKey" %in% names(base_df)) {
-      source_df <- dplyr::filter(source_df, PitchKey %in% base_df$PitchKey)
-    } else {
-      source_df <- base_df
-    }
-
-    # Session type - keep existing in-app semantics
-    df <- apply_session_type_filter(source_df, input$sessionType)
+    
+    # Session type - use modified data instead of original
+    df <- apply_session_type_filter(modified_pitch_data(), input$sessionType)
     
     # ⛔️ Team filtering - Filter by team selection ⛔️
     if (!is.null(input$teamType)) {
@@ -29118,22 +28764,8 @@ load_mods_on_startup <- tolower(trimws(Sys.getenv("LOAD_MODIFICATIONS_ON_STARTUP
     # protect against NULL during app init
     pitch_types <- if (is.null(input$pitchType)) "All" else input$pitchType
     
-    base_df <- fetch_pitch_data_neon_filtered(list(
-      date_start = input$dates[1],
-      date_end = input$dates[2],
-      session = input$sessionType,
-      pitcher = "",
-      batter = "",
-      pitcher_hand = input$hand,
-      batter_side = input$batterSide,
-      pitch_types = "All",
-      team_type = "All"
-    ))
-    if (is.null(base_df)) base_df <- pitch_data_pitching
-    base_df <- normalize_pitch_data_frame(base_df)
-
     # first, honor Session Type
-    df <- apply_session_type_filter(base_df, input$sessionType)
+    df <- apply_session_type_filter(pitch_data_pitching, input$sessionType)
     
     # Live-only BatterSide filter
     if (!is.null(input$batterSide) && input$batterSide != "All") {
