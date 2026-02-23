@@ -145,6 +145,26 @@ list_pitch_csvs <- function(data_dir) {
   files[grepl("([/\\\\]practice[/\\\\])|([/\\\\]v3[/\\\\])", tolower(files))]
 }
 
+collect_file_metadata <- function(files) {
+  if (!length(files)) {
+    return(data.frame(
+      source_file = character(0),
+      file_size = numeric(0),
+      file_mtime = as.POSIXct(character(0), tz = "UTC"),
+      stringsAsFactors = FALSE
+    ))
+  }
+
+  info <- file.info(files)
+  keep <- is.finite(info$size) & !is.na(info$mtime)
+  data.frame(
+    source_file = files[keep],
+    file_size = as.numeric(info$size[keep]),
+    file_mtime = as.POSIXct(info$mtime[keep], tz = "UTC"),
+    stringsAsFactors = FALSE
+  )
+}
+
 read_pitch_csv <- function(path) {
   df <- suppressMessages(readr::read_csv(
     path,
@@ -186,11 +206,92 @@ ensure_table <- function(con, table_ref, cols) {
   }
 }
 
+ensure_sync_state_table <- function(con, state_table_ref) {
+  tbl_sql <- DBI::dbQuoteIdentifier(con, state_table_ref)
+  DBI::dbExecute(con, sprintf(
+    paste(
+      "CREATE TABLE IF NOT EXISTS %s (",
+      "source_file TEXT PRIMARY KEY,",
+      "file_size BIGINT NOT NULL,",
+      "file_mtime TIMESTAMPTZ NOT NULL,",
+      "rows_synced BIGINT NOT NULL DEFAULT 0,",
+      "last_synced_at TIMESTAMPTZ NOT NULL DEFAULT NOW()",
+      ")"
+    ),
+    tbl_sql
+  ))
+}
+
+load_sync_state <- function(con, state_table_ref) {
+  if (!DBI::dbExistsTable(con, state_table_ref)) {
+    return(data.frame(
+      source_file = character(0),
+      file_size = numeric(0),
+      file_mtime = as.POSIXct(character(0), tz = "UTC"),
+      stringsAsFactors = FALSE
+    ))
+  }
+
+  state <- DBI::dbGetQuery(
+    con,
+    sprintf(
+      "SELECT source_file, file_size, file_mtime FROM %s",
+      DBI::dbQuoteIdentifier(con, state_table_ref)
+    )
+  )
+  state$source_file <- as.character(state$source_file)
+  state$file_size <- as.numeric(state$file_size)
+  state$file_mtime <- as.POSIXct(state$file_mtime, tz = "UTC")
+  state
+}
+
+select_files_to_sync <- function(metadata, state, only_changed = TRUE) {
+  if (!nrow(metadata)) return(character(0))
+  if (!only_changed || !nrow(state)) return(metadata$source_file)
+
+  match_idx <- match(metadata$source_file, state$source_file)
+  is_new <- is.na(match_idx)
+  size_changed <- !is_new & metadata$file_size != state$file_size[match_idx]
+  mtime_changed <- !is_new & abs(as.numeric(metadata$file_mtime) - as.numeric(state$file_mtime[match_idx])) > 1
+  metadata$source_file[is_new | size_changed | mtime_changed]
+}
+
+upsert_sync_state <- function(con, state_table_ref, state_df) {
+  if (!nrow(state_df)) return(invisible(NULL))
+
+  tmp_name <- paste0("tmp_pitch_sync_state_", as.integer(stats::runif(1, 1, 1e9)))
+  on.exit(
+    try(
+      DBI::dbExecute(con, sprintf("DROP TABLE IF EXISTS %s", DBI::dbQuoteIdentifier(con, tmp_name))),
+      silent = TRUE
+    ),
+    add = TRUE
+  )
+
+  DBI::dbWriteTable(con, tmp_name, state_df, temporary = TRUE, overwrite = TRUE, row.names = FALSE)
+  DBI::dbExecute(
+    con,
+    sprintf(
+      paste(
+        "INSERT INTO %s (source_file, file_size, file_mtime, rows_synced, last_synced_at)",
+        "SELECT source_file, file_size, file_mtime, rows_synced, NOW() FROM %s",
+        "ON CONFLICT (source_file) DO UPDATE SET",
+        "file_size = EXCLUDED.file_size,",
+        "file_mtime = EXCLUDED.file_mtime,",
+        "rows_synced = EXCLUDED.rows_synced,",
+        "last_synced_at = NOW()"
+      ),
+      DBI::dbQuoteIdentifier(con, state_table_ref),
+      DBI::dbQuoteIdentifier(con, tmp_name)
+    )
+  )
+}
+
 upsert_chunk <- function(con, table_ref, df_chunk) {
   tmp_name <- paste0("tmp_pitch_sync_", as.integer(stats::runif(1, 1, 1e9)))
   on.exit(try(DBI::dbExecute(con, sprintf("DROP TABLE IF EXISTS %s", DBI::dbQuoteIdentifier(con, tmp_name))), silent = TRUE), add = TRUE)
 
-  DBI::dbWriteTable(con, tmp_name, df_chunk, temporary = FALSE, overwrite = TRUE, row.names = FALSE)
+  DBI::dbWriteTable(con, tmp_name, df_chunk, temporary = TRUE, overwrite = TRUE, row.names = FALSE)
 
   cols <- names(df_chunk)
   target_cols <- paste(DBI::dbQuoteIdentifier(con, cols), collapse = ", ")
@@ -234,10 +335,13 @@ ensure_indexes <- function(con, table_ref) {
 }
 
 main <- function() {
+  t_main_start <- Sys.time()
   data_dir <- Sys.getenv("PITCH_DATA_SYNC_DIR", "data")
   table_name <- Sys.getenv("PITCH_DATA_DB_TABLE", "pitch_events")
   schema_name <- Sys.getenv("PITCH_DATA_DB_SCHEMA", "")
+  state_table_name <- Sys.getenv("PITCH_DATA_SYNC_STATE_TABLE", paste0(table_name, "_sync_files"))
   batch_size <- suppressWarnings(as.integer(Sys.getenv("PITCH_DATA_SYNC_BATCH", "20000")))
+  only_changed <- tolower(trimws(Sys.getenv("PITCH_DATA_SYNC_ONLY_CHANGED", "true"))) %in% c("1", "true", "yes")
   if (!is.finite(batch_size) || batch_size <= 0) batch_size <- 20000
 
   cfg <- get_db_config()
@@ -245,23 +349,20 @@ main <- function() {
     stop("No Neon/Postgres config found. Set PITCH_DATA_DB_URL or PITCH_DATA_DB_HOST/...", call. = FALSE)
   }
 
+  t_scan_start <- Sys.time()
   files <- list_pitch_csvs(data_dir)
   if (!length(files)) stop(sprintf("No practice/v3 CSVs found under %s", data_dir), call. = FALSE)
+  message(sprintf("TIMING list_pitch_csvs_sec: %.2f", as.numeric(difftime(Sys.time(), t_scan_start, units = "secs"))))
 
   message(sprintf("Found %d CSV files under %s", length(files), data_dir))
-  frames <- lapply(files, function(path) {
-    tryCatch(read_pitch_csv(path), error = function(e) {
-      message(sprintf("Skipping %s: %s", path, e$message))
-      NULL
-    })
-  })
-  frames <- Filter(Negate(is.null), frames)
-  if (!length(frames)) stop("No usable CSV data found.", call. = FALSE)
 
-  df <- bind_rows(frames)
-  df <- distinct(df, ingest_key, .keep_all = TRUE)
+  t_meta_start <- Sys.time()
+  metadata <- collect_file_metadata(files)
+  if (!nrow(metadata)) stop("No valid CSV file metadata available for sync.", call. = FALSE)
+  message(sprintf("TIMING collect_file_metadata_sec: %.2f", as.numeric(difftime(Sys.time(), t_meta_start, units = "secs"))))
 
   table_ref <- if (nzchar(schema_name)) DBI::Id(schema = schema_name, table = table_name) else DBI::Id(table = table_name)
+  state_table_ref <- if (nzchar(schema_name)) DBI::Id(schema = schema_name, table = state_table_name) else DBI::Id(table = state_table_name)
 
   params <- list(
     host = cfg$host,
@@ -276,9 +377,38 @@ main <- function() {
   con <- do.call(DBI::dbConnect, c(list(RPostgres::Postgres()), params))
   on.exit(DBI::dbDisconnect(con), add = TRUE)
 
+  t_state_start <- Sys.time()
+  ensure_sync_state_table(con, state_table_ref)
+  state <- load_sync_state(con, state_table_ref)
+  files_to_sync <- select_files_to_sync(metadata, state, only_changed = only_changed)
+  message(sprintf("TIMING state_filter_sec: %.2f", as.numeric(difftime(Sys.time(), t_state_start, units = "secs"))))
+
+  if (!length(files_to_sync)) {
+    message("Neon sync: no new or changed CSV files detected. Skipping data upsert.")
+    return(invisible(NULL))
+  }
+
+  message(sprintf("Syncing %d changed CSV file(s)", length(files_to_sync)))
+  t_read_start <- Sys.time()
+  frames <- lapply(files_to_sync, function(path) {
+    tryCatch(read_pitch_csv(path), error = function(e) {
+      message(sprintf("Skipping %s: %s", path, e$message))
+      NULL
+    })
+  })
+  frames <- Filter(Negate(is.null), frames)
+  message(sprintf("TIMING read_changed_csvs_sec: %.2f", as.numeric(difftime(Sys.time(), t_read_start, units = "secs"))))
+  if (!length(frames)) {
+    stop("No usable CSV data found in changed files.", call. = FALSE)
+  }
+
+  df <- bind_rows(frames)
+  df <- distinct(df, ingest_key, .keep_all = TRUE)
+
   ensure_table(con, table_ref, setdiff(names(df), c("ingest_key", "pitch_date", "source_file", "ingested_at")))
 
   total <- nrow(df)
+  t_upsert_start <- Sys.time()
   starts <- seq(1, total, by = batch_size)
   for (i in seq_along(starts)) {
     start <- starts[i]
@@ -287,9 +417,22 @@ main <- function() {
     upsert_chunk(con, table_ref, chunk)
     message(sprintf("Upserted rows %d-%d of %d", start, end, total))
   }
+  message(sprintf("TIMING upsert_chunks_sec: %.2f", as.numeric(difftime(Sys.time(), t_upsert_start, units = "secs"))))
 
+  t_state_write_start <- Sys.time()
+  state_updates <- metadata[metadata$source_file %in% files_to_sync, c("source_file", "file_size", "file_mtime"), drop = FALSE]
+  per_file_counts <- as.data.frame(table(df$source_file), stringsAsFactors = FALSE)
+  names(per_file_counts) <- c("source_file", "rows_synced")
+  state_updates <- merge(state_updates, per_file_counts, by = "source_file", all.x = TRUE, sort = FALSE)
+  state_updates$rows_synced[is.na(state_updates$rows_synced)] <- 0
+  upsert_sync_state(con, state_table_ref, state_updates)
+  message(sprintf("TIMING upsert_sync_state_sec: %.2f", as.numeric(difftime(Sys.time(), t_state_write_start, units = "secs"))))
+
+  t_index_start <- Sys.time()
   ensure_indexes(con, table_ref)
-  message(sprintf("Neon sync complete. Upserted %d unique rows into %s", total, table_name))
+  message(sprintf("TIMING ensure_indexes_sec: %.2f", as.numeric(difftime(Sys.time(), t_index_start, units = "secs"))))
+  message(sprintf("TIMING total_neon_sync_sec: %.2f", as.numeric(difftime(Sys.time(), t_main_start, units = "secs"))))
+  message(sprintf("Neon sync complete. Upserted %d unique rows into %s from %d changed file(s)", total, table_name, length(files_to_sync)))
 }
 
 main()

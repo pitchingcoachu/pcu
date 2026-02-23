@@ -17,29 +17,37 @@ suppressPackageStartupMessages({
 deploy_app <- function() {
   tryCatch({
     cat("Starting deployment of Harvard app...\n")
-    
-    # Run package installation script
-    cat("Running package installation script...\n")
-    if (file.exists("install_packages.R")) {
-      system2("Rscript", "install_packages.R", stdout = TRUE, stderr = TRUE)
-    } else {
-      cat("Warning: install_packages.R not found, installing packages manually...\n")
-      
-      # Install required packages if not already installed
-      required_packages <- c(
-        "shiny", "shinyjs", "dplyr", "purrr", "ggplot2", "DT", "gridExtra", 
-        "patchwork", "hexbin", "ggiraph", "httr2", "MASS", "digest",
-        "curl", "readr", "lubridate", "stringr", "akima", "colourpicker",
-        "memoise", "shinymanager", "DBI", "RSQLite",
-        "plotly", "jsonlite"
-      )
-      
-      for (pkg in required_packages) {
-        if (!requireNamespace(pkg, quietly = TRUE)) {
-          cat("Installing package:", pkg, "\n")
-          install.packages(pkg, dependencies = TRUE, quiet = TRUE)
+
+    install_pkgs <- tolower(trimws(Sys.getenv(
+      "DEPLOY_INSTALL_PACKAGES",
+      ifelse(nzchar(Sys.getenv("CI", "")), "false", "true")
+    ))) %in% c("1", "true", "yes")
+
+    if (install_pkgs) {
+      cat("Running package installation script...\n")
+      if (file.exists("install_packages.R")) {
+        system2("Rscript", "install_packages.R", stdout = TRUE, stderr = TRUE)
+      } else {
+        cat("Warning: install_packages.R not found, installing packages manually...\n")
+
+        # Install required packages if not already installed
+        required_packages <- c(
+          "shiny", "shinyjs", "dplyr", "purrr", "ggplot2", "DT", "gridExtra",
+          "patchwork", "hexbin", "ggiraph", "httr2", "MASS", "digest",
+          "curl", "readr", "lubridate", "stringr", "akima", "colourpicker",
+          "memoise", "shinymanager", "DBI", "RSQLite",
+          "plotly", "jsonlite"
+        )
+
+        for (pkg in required_packages) {
+          if (!requireNamespace(pkg, quietly = TRUE)) {
+            cat("Installing package:", pkg, "\n")
+            install.packages(pkg, dependencies = TRUE, quiet = TRUE)
+          }
         }
       }
+    } else {
+      cat("Skipping package installation (DEPLOY_INSTALL_PACKAGES=false)\n")
     }
     
     # Verify critical packages can be loaded

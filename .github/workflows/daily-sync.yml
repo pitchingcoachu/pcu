@@ -7,11 +7,18 @@ on:
     - cron: '0 12 * * *'   # 8:00 AM ET
   workflow_dispatch:
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   sync-and-deploy:
     runs-on: ubuntu-latest
     env:
       R_LIBS_USER: packrat/lib-R
+      CSV_CACHE_ROOT: /home/runner/work/pcu/pcu/.cache/csv_sync
+      DEPLOY_INSTALL_PACKAGES: "false"
+      PITCH_DATA_SYNC_ONLY_CHANGED: "true"
     
     steps:
     - name: Checkout repository
@@ -64,6 +71,9 @@ jobs:
     - name: Ensure Packrat library path
       run: mkdir -p packrat/lib-R
 
+    - name: Ensure CSV cache path
+      run: mkdir -p .cache/csv_sync
+
     - name: Cache Packrat library
       uses: actions/cache@v4
       with:
@@ -72,10 +82,24 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-r-packrat-
 
+    - name: Restore synced CSV cache
+      id: csv_cache_restore
+      uses: actions/cache/restore@v4
+      with:
+        path: .cache/csv_sync
+        key: ${{ runner.os }}-csv-sync-${{ github.run_id }}
+        restore-keys: |
+          ${{ runner.os }}-csv-sync-
+
     - name: Install R packages
       env:
         R_LIBS_USER: packrat/lib-R
-      run: Rscript install_packages.R
+      run: |
+        step_start=$(date +%s)
+        echo "TIMER_START install_r_packages=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        Rscript install_packages.R
+        step_end=$(date +%s)
+        echo "TIMER_END install_r_packages duration_sec=$((step_end-step_start))"
           
     - name: Configure rsconnect
       env:
@@ -84,12 +108,23 @@ jobs:
         SHINYAPPS_SECRET: ${{ secrets.SHINYAPPS_SECRET }}
         R_LIBS_USER: packrat/lib-R
       run: |
+        step_start=$(date +%s)
+        echo "TIMER_START configure_rsconnect=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         Rscript -e "rsconnect::setAccountInfo(name='${{ secrets.SHINYAPPS_ACCOUNT }}', token='${{ secrets.SHINYAPPS_TOKEN }}', secret='${{ secrets.SHINYAPPS_SECRET }}')"
+        step_end=$(date +%s)
+        echo "TIMER_END configure_rsconnect duration_sec=$((step_end-step_start))"
         
     - name: Sync GCU data
       env:
         R_LIBS_USER: packrat/lib-R
-      run: Rscript automated_data_sync.R
+        CSV_CACHE_ROOT: /home/runner/work/pcu/pcu/.cache/csv_sync
+        PITCH_DATA_SYNC_ONLY_CHANGED: "true"
+      run: |
+        step_start=$(date +%s)
+        echo "TIMER_START sync_gcu_data=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        Rscript automated_data_sync.R
+        step_end=$(date +%s)
+        echo "TIMER_END sync_gcu_data duration_sec=$((step_end-step_start))"
         
     - name: Sync TrackMan media (EdgeR → Cloudinary)
       env:
@@ -101,7 +136,12 @@ jobs:
         CLOUDINARY_FOLDER: ${{ secrets.CLOUDINARY_FOLDER }}
         TM_LOOKBACK_DAYS: ${{ secrets.TM_LOOKBACK_DAYS }}
         TM_ENV: ${{ secrets.TM_ENV }}
-      run: Rscript trackman_api_sync.R
+      run: |
+        step_start=$(date +%s)
+        echo "TIMER_START sync_trackman_media=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        Rscript trackman_api_sync.R
+        step_end=$(date +%s)
+        echo "TIMER_END sync_trackman_media duration_sec=$((step_end-step_start))"
         
     - name: Check if data directory exists
       id: check_data
@@ -119,11 +159,18 @@ jobs:
       if: steps.check_data.outputs.data_updated == 'true' || github.event_name == 'workflow_dispatch'
       env:
         R_LIBS_USER: packrat/lib-R
-      run: Rscript deploy_script.R
+      run: |
+        step_start=$(date +%s)
+        echo "TIMER_START deploy_shinyapps=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        Rscript deploy_script.R
+        step_end=$(date +%s)
+        echo "TIMER_END deploy_shinyapps duration_sec=$((step_end-step_start))"
       
     - name: Commit updated data
       if: steps.check_data.outputs.data_updated == 'true'
       run: |
+        step_start=$(date +%s)
+        echo "TIMER_START commit_updated_data=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         git add data/
@@ -135,3 +182,16 @@ jobs:
           git pull --rebase --autostash origin main
           git push
         fi
+        step_end=$(date +%s)
+        echo "TIMER_END commit_updated_data duration_sec=$((step_end-step_start))"
+
+    - name: Save synced CSV cache
+      uses: actions/cache/save@v4
+      with:
+        path: .cache/csv_sync
+        key: ${{ steps.csv_cache_restore.outputs.cache-primary-key }}
+
+    - name: Workflow timing summary
+      if: always()
+      run: |
+        echo "Timing summary is embedded above as TIMER_START/TIMER_END lines per major step."

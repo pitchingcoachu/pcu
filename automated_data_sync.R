@@ -39,6 +39,32 @@ dir.create(LOCAL_PRACTICE_DIR, recursive = TRUE, showWarnings = FALSE)
 dir.create(LOCAL_V3_DIR, recursive = TRUE, showWarnings = FALSE)
 cat("CSV cache root:", CSV_CACHE_ROOT, "\n")
 
+get_sync_dates <- function() {
+  fallback_lookback <- suppressWarnings(as.integer(Sys.getenv("SYNC_LOOKBACK_DAYS", "14")))
+  if (!is.finite(fallback_lookback) || fallback_lookback < 1) fallback_lookback <- 14
+  backfill_days <- suppressWarnings(as.integer(Sys.getenv("SYNC_BACKFILL_DAYS", "2")))
+  if (!is.finite(backfill_days) || backfill_days < 0) backfill_days <- 2
+
+  last_sync_file <- file.path(LOCAL_DATA_DIR, "last_sync.txt")
+  start_date <- Sys.Date() - fallback_lookback + 1
+
+  if (file.exists(last_sync_file)) {
+    raw <- trimws(readLines(last_sync_file, warn = FALSE))
+    if (length(raw) > 0 && nzchar(raw[1])) {
+      parsed_time <- suppressWarnings(as.POSIXct(raw[1], tz = "UTC"))
+      if (!is.na(parsed_time)) {
+        start_date <- as.Date(parsed_time, tz = "UTC") - backfill_days
+      }
+    }
+  }
+
+  min_date <- as.Date("2025-08-10")
+  if (start_date < min_date) start_date <- min_date
+  if (start_date > Sys.Date()) start_date <- Sys.Date()
+
+  seq.Date(start_date, Sys.Date(), by = "day")
+}
+
 # Function to list files in FTP directory
 list_ftp_files <- function(ftp_path) {
   url <- paste0("ftp://", FTP_HOST, ftp_path)
@@ -104,42 +130,33 @@ download_csv <- function(remote_file, local_file) {
 # Function to sync practice data (2025 folder with MM/DD structure)
 sync_practice_data <- function() {
   cat("Syncing practice data...\n")
-  years <- as.character(2025:year(Sys.Date()))
+  sync_dates <- get_sync_dates()
   downloaded_count <- 0
-  
-  for (yr in years) {
-    practice_base_path <- paste0("/practice/", yr, "/")
-    months <- list_ftp_files(practice_base_path)
-    month_dirs <- months[grepl("^\\d{2}$", months)]  # Match MM format
-    
-    for (month_dir in month_dirs) {
-      month_path <- paste0(practice_base_path, month_dir, "/")
-      cat("Checking practice month:", yr, month_dir, "\n")
-      
-      days <- list_ftp_files(month_path)
-      day_dirs <- days[grepl("^\\d{2}$", days)]  # Match DD format
-      
-      for (day_dir in day_dirs) {
-        day_path <- paste0(month_path, day_dir, "/")
-        cat("Processing practice date:", yr, "/", month_dir, "/", day_dir, "\n")
-        
-        files_in_day <- list_ftp_files(day_path)
-        csv_files <- files_in_day[grepl("\\.csv$", files_in_day, ignore.case = TRUE)]
-        
-        # Filter out files with "playerpositioning" in the name (allow unverified)
-        csv_files <- csv_files[!grepl("playerpositioning", csv_files, ignore.case = TRUE)]
-        
-        for (file in csv_files) {
-          remote_path <- paste0(day_path, file)
-          local_path <- file.path(LOCAL_PRACTICE_DIR, paste0("practice_", yr, "_", month_dir, "_", day_dir, "_", file))
-          
-          if (download_csv(remote_path, local_path)) {
-            downloaded_count <- downloaded_count + 1
-          }
-          
-          Sys.sleep(0.1)
-        }
+
+  for (current_date in sync_dates) {
+    yr <- format(current_date, "%Y")
+    month_dir <- format(current_date, "%m")
+    day_dir <- format(current_date, "%d")
+    day_path <- paste0("/practice/", yr, "/", month_dir, "/", day_dir, "/")
+
+    files_in_day <- list_ftp_files(day_path)
+    if (length(files_in_day) == 0) next
+
+    cat("Processing practice date:", format(current_date, "%Y/%m/%d"), "\n")
+    csv_files <- files_in_day[grepl("\\.csv$", files_in_day, ignore.case = TRUE)]
+
+    # Filter out files with "playerpositioning" in the name (allow unverified)
+    csv_files <- csv_files[!grepl("playerpositioning", csv_files, ignore.case = TRUE)]
+
+    for (file in csv_files) {
+      remote_path <- paste0(day_path, file)
+      local_path <- file.path(LOCAL_PRACTICE_DIR, paste0("practice_", yr, "_", month_dir, "_", day_dir, "_", file))
+
+      if (download_csv(remote_path, local_path)) {
+        downloaded_count <- downloaded_count + 1
       }
+
+      Sys.sleep(0.1)
     }
   }
   
@@ -169,87 +186,76 @@ is_date_in_range <- function(file_path) {
 # Function to sync v3 data with date filtering
 sync_v3_data <- function() {
   cat("Syncing v3 data with date filtering...\n")
-  years <- as.character(2025:year(Sys.Date()))
+  sync_dates <- get_sync_dates()
   downloaded_count <- 0
   seen_v3_files <- character(0)
-  
-  for (yr in years) {
-    v3_base_path <- paste0("/v3/", yr, "/")
-    
-    months <- list_ftp_files(v3_base_path)
-    month_dirs <- months[grepl("^\\d{2}$", months)]  # Match MM format
-    
-    for (month_dir in month_dirs) {
-      month_path <- paste0(v3_base_path, month_dir, "/")
-      cat("Checking month:", yr, month_dir, "\n")
-      
-      days <- list_ftp_files(month_path)
-      day_dirs <- days[grepl("^\\d{2}$", days)]  # Match DD format
-      
-      for (day_dir in day_dirs) {
-        day_path <- paste0(month_path, day_dir, "/")
-        full_date_path <- paste0(yr, "/", month_dir, "/", day_dir)
-        
-        if (!is_date_in_range(full_date_path)) {
-          next  # Skip this date
-        }
-        
-        cat("Processing date:", full_date_path, "\n")
-        
-        files_in_day <- list_ftp_files(day_path)
-        
-        if ("CSV" %in% files_in_day) {
-          csv_path <- paste0(day_path, "CSV/")
-          csv_files <- list_ftp_files(csv_path)
-          csv_files <- csv_files[grepl("\\.csv$", csv_files, ignore.case = TRUE)]
-          
-          # Filter out files with "playerpositioning" or "unverified" in v3 folder
-          csv_files <- csv_files[!grepl("playerpositioning", csv_files, ignore.case = TRUE)]
-          
-          for (file in csv_files) {
-            if (!nzchar(file)) next
-            remote_path <- paste0(csv_path, file)
-            # De-dupe by full remote path, not basename, so same filename on new dates is still synced.
-            file_key <- tolower(trimws(remote_path))
-            if (file_key %in% seen_v3_files) {
-              cat("Skipping duplicate v3 CSV suffix:", file, "(already processed)\n")
-              next
-            }
-            seen_v3_files <- c(seen_v3_files, file_key)
 
-            local_path <- file.path(LOCAL_V3_DIR, paste0("v3_", yr, "_", month_dir, "_", day_dir, "_", file))
-            
-            if (download_csv(remote_path, local_path)) {
-              downloaded_count <- downloaded_count + 1
-            }
-            
-            Sys.sleep(0.1)
-          }
-        } else {
-          csv_files <- files_in_day[grepl("\\.csv$", files_in_day, ignore.case = TRUE)]
-          
-          csv_files <- csv_files[!grepl("playerpositioning|unverified", csv_files, ignore.case = TRUE)]
-          
-          for (file in csv_files) {
-            if (!nzchar(file)) next
-            remote_path <- paste0(day_path, file)
-            # De-dupe by full remote path, not basename, so same filename on new dates is still synced.
-            file_key <- tolower(trimws(remote_path))
-            if (file_key %in% seen_v3_files) {
-              cat("Skipping duplicate v3 CSV suffix:", file, "(already processed)\n")
-              next
-            }
-            seen_v3_files <- c(seen_v3_files, file_key)
+  for (current_date in sync_dates) {
+    yr <- format(current_date, "%Y")
+    month_dir <- format(current_date, "%m")
+    day_dir <- format(current_date, "%d")
+    day_path <- paste0("/v3/", yr, "/", month_dir, "/", day_dir, "/")
+    full_date_path <- format(current_date, "%Y/%m/%d")
 
-            local_path <- file.path(LOCAL_V3_DIR, paste0("v3_", yr, "_", month_dir, "_", day_dir, "_", file))
-            
-            if (download_csv(remote_path, local_path)) {
-              downloaded_count <- downloaded_count + 1
-            }
-            
-            Sys.sleep(0.1)
-          }
+    if (!is_date_in_range(full_date_path)) {
+      next
+    }
+
+    files_in_day <- list_ftp_files(day_path)
+    if (length(files_in_day) == 0) next
+
+    cat("Processing date:", full_date_path, "\n")
+
+    if ("CSV" %in% files_in_day) {
+      csv_path <- paste0(day_path, "CSV/")
+      csv_files <- list_ftp_files(csv_path)
+      csv_files <- csv_files[grepl("\\.csv$", csv_files, ignore.case = TRUE)]
+
+      # Filter out files with "playerpositioning" or "unverified" in v3 folder
+      csv_files <- csv_files[!grepl("playerpositioning", csv_files, ignore.case = TRUE)]
+
+      for (file in csv_files) {
+        if (!nzchar(file)) next
+        remote_path <- paste0(csv_path, file)
+        # De-dupe by full remote path, not basename, so same filename on new dates is still synced.
+        file_key <- tolower(trimws(remote_path))
+        if (file_key %in% seen_v3_files) {
+          cat("Skipping duplicate v3 CSV suffix:", file, "(already processed)\n")
+          next
         }
+        seen_v3_files <- c(seen_v3_files, file_key)
+
+        local_path <- file.path(LOCAL_V3_DIR, paste0("v3_", yr, "_", month_dir, "_", day_dir, "_", file))
+
+        if (download_csv(remote_path, local_path)) {
+          downloaded_count <- downloaded_count + 1
+        }
+
+        Sys.sleep(0.1)
+      }
+    } else {
+      csv_files <- files_in_day[grepl("\\.csv$", files_in_day, ignore.case = TRUE)]
+
+      csv_files <- csv_files[!grepl("playerpositioning|unverified", csv_files, ignore.case = TRUE)]
+
+      for (file in csv_files) {
+        if (!nzchar(file)) next
+        remote_path <- paste0(day_path, file)
+        # De-dupe by full remote path, not basename, so same filename on new dates is still synced.
+        file_key <- tolower(trimws(remote_path))
+        if (file_key %in% seen_v3_files) {
+          cat("Skipping duplicate v3 CSV suffix:", file, "(already processed)\n")
+          next
+        }
+        seen_v3_files <- c(seen_v3_files, file_key)
+
+        local_path <- file.path(LOCAL_V3_DIR, paste0("v3_", yr, "_", month_dir, "_", day_dir, "_", file))
+
+        if (download_csv(remote_path, local_path)) {
+          downloaded_count <- downloaded_count + 1
+        }
+
+        Sys.sleep(0.1)
       }
     }
   }
@@ -363,8 +369,13 @@ main_sync <- function() {
   }
   
   # Sync both data sources
+  t_practice_start <- Sys.time()
   practice_updated <- sync_practice_data()
+  cat("TIMING sync_practice_data_sec:", round(as.numeric(difftime(Sys.time(), t_practice_start, units = "secs")), 2), "\n")
+
+  t_v3_start <- Sys.time()
   v3_updated <- sync_v3_data()
+  cat("TIMING sync_v3_data_sec:", round(as.numeric(difftime(Sys.time(), t_v3_start, units = "secs")), 2), "\n")
   
   end_time <- Sys.time()
   duration <- difftime(end_time, start_time, units = "mins")
@@ -373,7 +384,9 @@ main_sync <- function() {
   
   # Deduplicate downloaded files if any data was updated
   if (practice_updated || v3_updated) {
+    t_dedupe_start <- Sys.time()
     deduplicate_files()
+    cat("TIMING deduplicate_files_sec:", round(as.numeric(difftime(Sys.time(), t_dedupe_start, units = "secs")), 2), "\n")
   }
   
   # Update last sync timestamp and modification notification
@@ -385,7 +398,12 @@ main_sync <- function() {
   }
 
   video_updated <- tryCatch(
-    sync_video_map_from_neon(file.path(LOCAL_DATA_DIR, "video_map.csv")),
+    {
+      t_video_start <- Sys.time()
+      out <- sync_video_map_from_neon(file.path(LOCAL_DATA_DIR, "video_map.csv"))
+      cat("TIMING sync_video_map_from_neon_sec:", round(as.numeric(difftime(Sys.time(), t_video_start, units = "secs")), 2), "\n")
+      out
+    },
     error = function(e) {
       cat("Skipping Neon video map sync:", e$message, "\n")
       FALSE
@@ -400,6 +418,7 @@ main_sync <- function() {
     neon_sync_script <- file.path("scripts", "sync_pitch_data_to_neon.R")
     if (file.exists(neon_sync_script)) {
       cat("Syncing pitch CSV history to Neon table...\n")
+      t_neon_start <- Sys.time()
       neon_status <- tryCatch(
         system2(
           "Rscript",
@@ -411,6 +430,7 @@ main_sync <- function() {
         error = function(e) paste("Neon sync failed:", e$message)
       )
       cat(paste(neon_status, collapse = "\n"), "\n")
+      cat("TIMING sync_pitch_data_to_neon_sec:", round(as.numeric(difftime(Sys.time(), t_neon_start, units = "secs")), 2), "\n")
     } else {
       cat("Skipping Neon pitch sync; missing script:", neon_sync_script, "\n")
     }
