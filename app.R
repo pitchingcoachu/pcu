@@ -27789,6 +27789,7 @@ deg_to_clock <- function(x) {
   
   # Reactive value to track modification statistics
   modification_stats <- reactiveVal(list(applied_count = 0, total_modifications = 0))
+  modified_pitch_data(pitch_data_pitching)
   
   # Function to load modifications with feedback
   load_modifications <- function(force_reload = FALSE, verbose = TRUE) {
@@ -27832,8 +27833,11 @@ deg_to_clock <- function(x) {
     }
   }
   
-  # Load modifications on startup
-  load_modifications(force_reload = FALSE, verbose = TRUE)
+  # Load modifications once on startup (can be disabled via env if needed).
+  load_mods_on_startup <- tolower(trimws(Sys.getenv("LOAD_MODIFICATIONS_ON_STARTUP", "true"))) %in% c("1", "true", "yes")
+  if (load_mods_on_startup) {
+    load_modifications(force_reload = FALSE, verbose = TRUE)
+  }
   
   # Add a reactive timer to check for data updates every 30 seconds
   autoCheck <- reactiveTimer(30000)  # 30 seconds
@@ -28955,8 +28959,16 @@ deg_to_clock <- function(x) {
     }
     base_df <- normalize_pitch_data_frame(base_df)
     base_df <- ensure_pitch_keys(base_df)
-    mod_result <- tryCatch(load_pitch_modifications_db(base_df, verbose = FALSE), error = function(e) NULL)
-    source_df <- if (!is.null(mod_result) && !is.null(mod_result$data)) mod_result$data else base_df
+
+    # Apply cached modifications without reloading from DB on every reactive run.
+    source_df <- tryCatch(modified_pitch_data(), error = function(e) NULL)
+    if (is.null(source_df) || !nrow(source_df)) source_df <- pitch_data_pitching
+    source_df <- ensure_pitch_keys(normalize_pitch_data_frame(source_df))
+    if ("PitchKey" %in% names(source_df) && "PitchKey" %in% names(base_df)) {
+      source_df <- dplyr::filter(source_df, PitchKey %in% base_df$PitchKey)
+    } else {
+      source_df <- base_df
+    }
 
     # Session type - keep existing in-app semantics
     df <- apply_session_type_filter(source_df, input$sessionType)
