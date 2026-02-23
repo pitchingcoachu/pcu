@@ -133,7 +133,8 @@ sync_practice_data <- function() {
   sync_dates <- get_sync_dates()
   downloaded_count <- 0
 
-  for (current_date in sync_dates) {
+  for (idx in seq_along(sync_dates)) {
+    current_date <- sync_dates[idx]
     yr <- format(current_date, "%Y")
     month_dir <- format(current_date, "%m")
     day_dir <- format(current_date, "%d")
@@ -190,7 +191,8 @@ sync_v3_data <- function() {
   downloaded_count <- 0
   seen_v3_files <- character(0)
 
-  for (current_date in sync_dates) {
+  for (idx in seq_along(sync_dates)) {
+    current_date <- sync_dates[idx]
     yr <- format(current_date, "%Y")
     month_dir <- format(current_date, "%m")
     day_dir <- format(current_date, "%d")
