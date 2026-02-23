@@ -6018,7 +6018,14 @@ if (rows_removed_dedupe > 0) {
 # Read lookup table and keep Email in a separate column to avoid .x/.y
 lookup_table <- if (file.exists("lookup_table.csv")) {
   read.csv("lookup_table.csv", stringsAsFactors = FALSE) %>%
-    dplyr::rename(Pitcher = PlayerName, Email_lookup = Email)
+    dplyr::rename(Pitcher = PlayerName, Email_lookup = Email) %>%
+    dplyr::mutate(
+      Pitcher = trimws(as.character(Pitcher)),
+      Email_lookup = trimws(as.character(Email_lookup))
+    ) %>%
+    dplyr::filter(!is.na(Pitcher), nzchar(Pitcher)) %>%
+    dplyr::arrange(dplyr::desc(!is.na(Email_lookup) & nzchar(Email_lookup))) %>%
+    dplyr::distinct(Pitcher, .keep_all = TRUE)
 } else {
   data.frame(Pitcher = character(), Email_lookup = character(), stringsAsFactors = FALSE)
 }
@@ -27859,7 +27866,7 @@ deg_to_clock <- function(x) {
   }
   
   # Load modifications once on startup (can be disabled via env if needed).
-  load_mods_on_startup <- tolower(trimws(Sys.getenv("LOAD_MODIFICATIONS_ON_STARTUP", "true"))) %in% c("1", "true", "yes")
+load_mods_on_startup <- tolower(trimws(Sys.getenv("LOAD_MODIFICATIONS_ON_STARTUP", "false"))) %in% c("1", "true", "yes")
   if (load_mods_on_startup) {
     load_modifications(force_reload = FALSE, verbose = TRUE)
   }
