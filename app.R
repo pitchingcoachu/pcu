@@ -21579,28 +21579,134 @@ save_workload_manual_entries <- function(entries) {
 
 manual_velocity_entries_path <- function() file.path(workload_data_dir(), "manual_velocity_entries.csv")
 
-load_manual_velocity_entries <- function(app_id = current_school()) {
-  ensure_workload_data_dir()
-  path <- manual_velocity_entries_path()
-  if (!file.exists(path)) {
-    return(tibble::tibble(
-      id = character(),
-      app_id = character(),
-      entry_date = as.Date(character()),
-      pitcher = character(),
-      throw_type = character(),
-      plyo_drill = character(),
-      ball_weight_oz = double(),
-      velocity_mph = double(),
-      notes = character(),
-      created_at = as.POSIXct(character())
-    ))
-  }
-  df <- readr::read_csv(
-    path,
-    col_types = readr::cols(.default = readr::col_guess()),
-    show_col_types = FALSE
+get_manual_velocity_db_config <- function() {
+  candidates <- c(
+    Sys.getenv("MANUAL_VELO_DB_URL", ""),
+    Sys.getenv("NEON_DATABASE_URL", ""),
+    Sys.getenv("DATABASE_URL", ""),
+    Sys.getenv("BIOMECH_DB_URL", ""),
+    Sys.getenv("PITCH_MOD_DB_URL", "")
   )
+  candidates <- candidates[nzchar(candidates)]
+  for (url in candidates) {
+    parsed <- parse_pitch_mod_postgres_uri(url)
+    if (!is.null(parsed)) return(parsed)
+  }
+  # Fall back to shared YAML config used by other Postgres/Neon backends.
+  config_path <- Sys.getenv("PITCH_MOD_DB_CONFIG", "auth_db_config.yml")
+  cfg <- read_pitch_mod_db_config(config_path)
+  if (is.null(cfg)) return(NULL)
+  driver <- tolower(cfg$driver %||% "")
+  if (!driver %in% c("postgres", "postgresql", "neon")) return(NULL)
+  port_val <- suppressWarnings(as.integer(cfg$port %||% "5432"))
+  if (is.na(port_val) || port_val <= 0) port_val <- 5432
+  list(
+    host = cfg$host %||% "",
+    port = port_val,
+    user = cfg$user %||% "",
+    password = cfg$password %||% "",
+    dbname = cfg$dbname %||% "",
+    sslmode = cfg$sslmode %||% "require",
+    channel_binding = cfg$channel_binding %||% "require"
+  )
+}
+
+manual_velocity_backend <- function() {
+  cfg <- get_manual_velocity_db_config()
+  if (!is.null(cfg) && nzchar(cfg$host %||% "") && nzchar(cfg$dbname %||% "") &&
+      nzchar(cfg$user %||% "") && nzchar(cfg$password %||% "")) {
+    return(list(type = "postgres", config = cfg))
+  }
+  list(type = "csv")
+}
+
+manual_velocity_db_connect <- function() {
+  backend <- manual_velocity_backend()
+  if (!identical(backend$type, "postgres")) return(NULL)
+  if (!requireNamespace("RPostgres", quietly = TRUE)) return(NULL)
+  cfg <- backend$config
+  params <- list(
+    host = cfg$host,
+    port = cfg$port %||% 5432,
+    user = cfg$user,
+    password = cfg$password,
+    dbname = cfg$dbname,
+    sslmode = cfg$sslmode %||% "require"
+  )
+  if (nzchar(cfg$channel_binding %||% "")) {
+    params$channel_binding <- cfg$channel_binding
+  }
+  tryCatch(
+    do.call(DBI::dbConnect, c(list(RPostgres::Postgres()), params)),
+    error = function(e) NULL
+  )
+}
+
+ensure_manual_velocity_table <- function(con) {
+  DBI::dbExecute(con, "
+    CREATE TABLE IF NOT EXISTS manual_velocity_entries (
+      id TEXT PRIMARY KEY,
+      app_id TEXT NOT NULL,
+      entry_date DATE,
+      pitcher TEXT,
+      throw_type TEXT,
+      plyo_drill TEXT,
+      ball_weight_oz NUMERIC,
+      velocity_mph NUMERIC,
+      notes TEXT,
+      created_at TIMESTAMP
+    )
+  ")
+  DBI::dbExecute(con, "
+    CREATE INDEX IF NOT EXISTS idx_manual_velocity_app_id
+    ON manual_velocity_entries(app_id)
+  ")
+}
+
+load_manual_velocity_entries <- function(app_id = current_school()) {
+  empty_tbl <- tibble::tibble(
+    id = character(),
+    app_id = character(),
+    entry_date = as.Date(character()),
+    pitcher = character(),
+    throw_type = character(),
+    plyo_drill = character(),
+    ball_weight_oz = double(),
+    velocity_mph = double(),
+    notes = character(),
+    created_at = as.POSIXct(character())
+  )
+
+  backend <- manual_velocity_backend()
+  df <- NULL
+
+  if (identical(backend$type, "postgres")) {
+    con <- manual_velocity_db_connect()
+    if (!is.null(con)) {
+      on.exit(tryCatch(DBI::dbDisconnect(con), error = function(e) NULL), add = TRUE)
+      try(ensure_manual_velocity_table(con), silent = TRUE)
+      quoted_app <- DBI::dbQuoteString(con, app_id)
+      sql <- sprintf(
+        "SELECT id, app_id, entry_date, pitcher, throw_type, plyo_drill, ball_weight_oz, velocity_mph, notes, created_at
+         FROM manual_velocity_entries
+         WHERE app_id = %s
+         ORDER BY entry_date DESC, created_at DESC",
+        quoted_app
+      )
+      df <- tryCatch(DBI::dbGetQuery(con, sql), error = function(e) NULL)
+    }
+  }
+
+  if (is.null(df)) {
+    ensure_workload_data_dir()
+    path <- manual_velocity_entries_path()
+    if (!file.exists(path)) return(empty_tbl)
+    df <- tryCatch(
+      readr::read_csv(path, col_types = readr::cols(.default = readr::col_guess()), show_col_types = FALSE),
+      error = function(e) empty_tbl
+    )
+  }
+
   if (!"id" %in% names(df)) df$id <- sprintf("legacy_%s", seq_len(nrow(df)))
   if (!"app_id" %in% names(df)) df$app_id <- app_id
   if (!"entry_date" %in% names(df)) df$entry_date <- as.Date(NA_real_)[seq_len(nrow(df))]
@@ -21627,13 +21733,10 @@ load_manual_velocity_entries <- function(app_id = current_school()) {
 }
 
 save_manual_velocity_entries <- function(entries, app_id = current_school()) {
+  backend <- manual_velocity_backend()
+
   ensure_workload_data_dir()
   path <- manual_velocity_entries_path()
-  existing <- if (file.exists(path)) {
-    suppressMessages(readr::read_csv(path, show_col_types = FALSE))
-  } else {
-    tibble::tibble()
-  }
   normalize_manual_velocity_types <- function(df) {
     if (is.null(df) || !nrow(df)) return(as.data.frame(df, stringsAsFactors = FALSE))
     if (!"id" %in% names(df)) df$id <- sprintf("mv_legacy_%s", seq_len(nrow(df)))
@@ -21662,8 +21765,36 @@ save_manual_velocity_entries <- function(entries, app_id = current_school()) {
       dplyr::select(id, app_id, entry_date, pitcher, throw_type, plyo_drill, ball_weight_oz, velocity_mph, notes, created_at)
   }
 
-  existing <- normalize_manual_velocity_types(existing)
   entries <- normalize_manual_velocity_types(entries)
+
+  if (identical(backend$type, "postgres")) {
+    con <- manual_velocity_db_connect()
+    if (!is.null(con)) {
+      on.exit(tryCatch(DBI::dbDisconnect(con), error = function(e) NULL), add = TRUE)
+      ok <- tryCatch({
+        ensure_manual_velocity_table(con)
+        DBI::dbBegin(con)
+        quoted_app <- DBI::dbQuoteString(con, app_id)
+        DBI::dbExecute(con, sprintf("DELETE FROM manual_velocity_entries WHERE app_id = %s", quoted_app))
+        if (nrow(entries)) {
+          DBI::dbWriteTable(con, "manual_velocity_entries", entries, append = TRUE, row.names = FALSE)
+        }
+        DBI::dbCommit(con)
+        TRUE
+      }, error = function(e) {
+        tryCatch(DBI::dbRollback(con), error = function(e2) NULL)
+        FALSE
+      })
+      if (isTRUE(ok)) return(invisible(TRUE))
+    }
+  }
+
+  existing <- if (file.exists(path)) {
+    suppressMessages(readr::read_csv(path, show_col_types = FALSE))
+  } else {
+    tibble::tibble()
+  }
+  existing <- normalize_manual_velocity_types(existing)
   keep_existing <- if (nrow(existing) && "app_id" %in% names(existing)) {
     dplyr::filter(existing, app_id != !!app_id)
   } else {
