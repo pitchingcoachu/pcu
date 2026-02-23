@@ -21634,6 +21634,36 @@ save_manual_velocity_entries <- function(entries, app_id = current_school()) {
   } else {
     tibble::tibble()
   }
+  normalize_manual_velocity_types <- function(df) {
+    if (is.null(df) || !nrow(df)) return(as.data.frame(df, stringsAsFactors = FALSE))
+    if (!"id" %in% names(df)) df$id <- sprintf("mv_legacy_%s", seq_len(nrow(df)))
+    if (!"app_id" %in% names(df)) df$app_id <- app_id
+    if (!"entry_date" %in% names(df)) df$entry_date <- as.Date(NA_real_)[seq_len(nrow(df))]
+    if (!"pitcher" %in% names(df)) df$pitcher <- character(nrow(df))
+    if (!"throw_type" %in% names(df)) df$throw_type <- character(nrow(df))
+    if (!"plyo_drill" %in% names(df)) df$plyo_drill <- character(nrow(df))
+    if (!"ball_weight_oz" %in% names(df)) df$ball_weight_oz <- NA_real_
+    if (!"velocity_mph" %in% names(df)) df$velocity_mph <- NA_real_
+    if (!"notes" %in% names(df)) df$notes <- character(nrow(df))
+    if (!"created_at" %in% names(df)) df$created_at <- as.character(Sys.time())
+    df %>%
+      dplyr::mutate(
+        id = as.character(id),
+        app_id = as.character(app_id),
+        entry_date = suppressWarnings(as.Date(entry_date)),
+        pitcher = as.character(pitcher),
+        throw_type = as.character(throw_type),
+        plyo_drill = as.character(plyo_drill),
+        ball_weight_oz = suppressWarnings(as.numeric(ball_weight_oz)),
+        velocity_mph = suppressWarnings(as.numeric(velocity_mph)),
+        notes = as.character(notes),
+        created_at = suppressWarnings(as.POSIXct(created_at, tz = "UTC"))
+      ) %>%
+      dplyr::select(id, app_id, entry_date, pitcher, throw_type, plyo_drill, ball_weight_oz, velocity_mph, notes, created_at)
+  }
+
+  existing <- normalize_manual_velocity_types(existing)
+  entries <- normalize_manual_velocity_types(entries)
   keep_existing <- if (nrow(existing) && "app_id" %in% names(existing)) {
     dplyr::filter(existing, app_id != !!app_id)
   } else {
