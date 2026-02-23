@@ -6,6 +6,19 @@ on:
     - cron: '0 2 * * *'    # 10:00 PM ET
     - cron: '0 12 * * *'   # 8:00 AM ET
   workflow_dispatch:
+    inputs:
+      pitch_data_sync_only_changed:
+        description: "Set false to force full Neon pitch backfill from cached CSVs"
+        required: false
+        default: ""
+      force_neon_pitch_sync:
+        description: "Set true to force Neon pitch sync even if no CSV downloads"
+        required: false
+        default: ""
+      sync_lookback_days:
+        description: "Optional date lookback window (days)"
+        required: false
+        default: ""
 
 defaults:
   run:
@@ -18,9 +31,9 @@ jobs:
       R_LIBS_USER: packrat/lib-R
       CSV_CACHE_ROOT: /home/runner/work/pcu/pcu/.cache/csv_sync
       DEPLOY_INSTALL_PACKAGES: "false"
-      PITCH_DATA_SYNC_ONLY_CHANGED: ${{ vars.PITCH_DATA_SYNC_ONLY_CHANGED || 'true' }}
-      FORCE_NEON_PITCH_SYNC: ${{ vars.FORCE_NEON_PITCH_SYNC || 'false' }}
-      SYNC_LOOKBACK_DAYS: ${{ vars.SYNC_LOOKBACK_DAYS || '14' }}
+      PITCH_DATA_SYNC_ONLY_CHANGED: ${{ github.event.inputs.pitch_data_sync_only_changed || vars.PITCH_DATA_SYNC_ONLY_CHANGED || 'true' }}
+      FORCE_NEON_PITCH_SYNC: ${{ github.event.inputs.force_neon_pitch_sync || vars.FORCE_NEON_PITCH_SYNC || 'false' }}
+      SYNC_LOOKBACK_DAYS: ${{ github.event.inputs.sync_lookback_days || vars.SYNC_LOOKBACK_DAYS || '14' }}
     
     steps:
     - name: Checkout repository
