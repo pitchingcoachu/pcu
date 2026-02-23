@@ -27,7 +27,7 @@ USE_DATA_FOLDER_CACHE <- tolower(trimws(Sys.getenv("USE_DATA_FOLDER_CACHE", "fal
 CSV_CACHE_ROOT <- if (USE_DATA_FOLDER_CACHE) {
   LOCAL_DATA_DIR
 } else {
-  Sys.getenv("CSV_CACHE_ROOT", file.path(tempdir(), "pcu_sync_cache"))
+  path.expand(Sys.getenv("CSV_CACHE_ROOT", "~/pcu_sync_cache"))
 }
 LOCAL_PRACTICE_DIR <- file.path(CSV_CACHE_ROOT, "practice")
 LOCAL_V3_DIR <- file.path(CSV_CACHE_ROOT, "v3")
