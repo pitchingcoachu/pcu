@@ -416,7 +416,13 @@ main_sync <- function() {
   }
 
   push_to_neon <- tolower(trimws(Sys.getenv("SYNC_PITCH_DATA_TO_NEON", "true"))) %in% c("1", "true", "yes")
-  if (push_to_neon && (practice_updated || v3_updated)) {
+  only_changed_sync <- tolower(trimws(Sys.getenv("PITCH_DATA_SYNC_ONLY_CHANGED", "true"))) %in% c("1", "true", "yes")
+  force_neon_pitch_sync <- tolower(trimws(Sys.getenv("FORCE_NEON_PITCH_SYNC", "false"))) %in% c("1", "true", "yes")
+  should_run_neon_pitch_sync <- push_to_neon && (
+    practice_updated || v3_updated || !only_changed_sync || force_neon_pitch_sync
+  )
+
+  if (should_run_neon_pitch_sync) {
     neon_sync_script <- file.path("scripts", "sync_pitch_data_to_neon.R")
     if (file.exists(neon_sync_script)) {
       cat("Syncing pitch CSV history to Neon table...\n")
