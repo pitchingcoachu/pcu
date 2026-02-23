@@ -5827,8 +5827,7 @@ if (is.null(pitch_data)) {
 log_startup_timing(sprintf("Loaded %d rows from Neon pitch table", nrow(pitch_data)))
 
 # Ensure required columns exist since downstream code expects them
-# ------ add to need_cols ------
-need_cols <- c(
+PITCH_DATA_REQUIRED_COLS <- c(
   "Date","Pitcher","Email","PitcherThrows","TaggedPitchType",
   "InducedVertBreak","HorzBreak","RelSpeed","ReleaseTilt","BreakTilt",
   "SpinEfficiency","SpinRate","RelHeight","RelSide","Extension",
@@ -5840,56 +5839,57 @@ need_cols <- c(
   "VideoClip","VideoClip2","VideoClip3"
 )
 
+normalize_pitch_data_frame <- function(df) {
+  if (is.null(df)) return(df)
+  for (nm in PITCH_DATA_REQUIRED_COLS) if (!nm %in% names(df)) df[[nm]] <- NA_character_
 
-
-for (nm in need_cols) if (!nm %in% names(pitch_data)) pitch_data[[nm]] <- NA_character_
-
-# Type cleanup + standardization (now safe to coerce)
-pitch_data <- pitch_data %>%
-  mutate(
-    Date            = parse_date_mdy(Date),
-    Pitcher         = as.character(Pitcher),
-    Email           = as.character(Email),
-    PitcherThrows   = as.character(PitcherThrows),
-    TaggedPitchType = trimws(as.character(TaggedPitchType)),
-    InducedVertBreak= as.numeric(InducedVertBreak),
-    HorzBreak       = as.numeric(HorzBreak),
-    RelSpeed        = as.numeric(RelSpeed),
-    ReleaseTilt     = as.numeric(ReleaseTilt),
-    BreakTilt       = as.numeric(BreakTilt),
-    SpinEfficiency  = as.numeric(SpinEfficiency),
-    SpinRate        = as.numeric(SpinRate),
-    RelHeight       = as.numeric(RelHeight),
-    RelSide         = as.numeric(RelSide),
-    VertApprAngle   = as.numeric(VertApprAngle),
-    HorzApprAngle   = as.numeric(HorzApprAngle),
-    PlateLocSide    = as.numeric(PlateLocSide),
-    PlateLocHeight  = as.numeric(PlateLocHeight),
-    Extension       = as.numeric(Extension),
-    ExitSpeed       = as.numeric(ExitSpeed),   # ← NEW
-    Angle           = as.numeric(Angle),       # ← NEW
-    BatterSide      = as.character(BatterSide), # ← NEW
-    PlayResult      = as.character(PlayResult),
-    Batter         = as.character(Batter),
-    Catcher = as.character(Catcher),
-    SessionType = factor(
-      dplyr::case_when(
-        grepl("bull|prac", tolower(as.character(SessionType))) ~ "Bullpen",
-        grepl("live|game|ab", tolower(as.character(SessionType))) ~ "Live",
-        grepl("[/\\\\]practice[/\\\\]", tolower(SourceFile)) ~ "Bullpen",  # fallback: folder
-        grepl("[/\\\\]v3[/\\\\]",       tolower(SourceFile)) ~ "Live",
-        TRUE ~ NA_character_
+  df %>%
+    mutate(
+      Date            = parse_date_mdy(Date),
+      Pitcher         = as.character(Pitcher),
+      Email           = as.character(Email),
+      PitcherThrows   = as.character(PitcherThrows),
+      TaggedPitchType = trimws(as.character(TaggedPitchType)),
+      InducedVertBreak= as.numeric(InducedVertBreak),
+      HorzBreak       = as.numeric(HorzBreak),
+      RelSpeed        = as.numeric(RelSpeed),
+      ReleaseTilt     = as.numeric(ReleaseTilt),
+      BreakTilt       = as.numeric(BreakTilt),
+      SpinEfficiency  = as.numeric(SpinEfficiency),
+      SpinRate        = as.numeric(SpinRate),
+      RelHeight       = as.numeric(RelHeight),
+      RelSide         = as.numeric(RelSide),
+      VertApprAngle   = as.numeric(VertApprAngle),
+      HorzApprAngle   = as.numeric(HorzApprAngle),
+      PlateLocSide    = as.numeric(PlateLocSide),
+      PlateLocHeight  = as.numeric(PlateLocHeight),
+      Extension       = as.numeric(Extension),
+      ExitSpeed       = as.numeric(ExitSpeed),
+      Angle           = as.numeric(Angle),
+      BatterSide      = as.character(BatterSide),
+      PlayResult      = as.character(PlayResult),
+      Batter          = as.character(Batter),
+      Catcher         = as.character(Catcher),
+      SessionType = factor(
+        dplyr::case_when(
+          grepl("bull|prac", tolower(as.character(SessionType))) ~ "Bullpen",
+          grepl("live|game|ab", tolower(as.character(SessionType))) ~ "Live",
+          grepl("[/\\\\]practice[/\\\\]", tolower(SourceFile)) ~ "Bullpen",
+          grepl("[/\\\\]v3[/\\\\]",       tolower(SourceFile)) ~ "Live",
+          TRUE ~ NA_character_
+        ),
+        levels = c("Bullpen","Live")
       ),
-      levels = c("Bullpen","Live")
-    ),
-    KorBB           = as.character(KorBB),
-    Balls           = as.numeric(Balls),
-    Strikes         = as.numeric(Strikes),
-    # Convert FourSeamFastBall to Fastball
-    TaggedPitchType = ifelse(TaggedPitchType == "FourSeamFastBall", "Fastball", TaggedPitchType)
-  ) %>%
-  dplyr::filter(!is.na(TaggedPitchType) & tolower(TaggedPitchType) != "undefined") %>%
-  force_pitch_levels()
+      KorBB           = as.character(KorBB),
+      Balls           = as.numeric(Balls),
+      Strikes         = as.numeric(Strikes),
+      TaggedPitchType = ifelse(TaggedPitchType == "FourSeamFastBall", "Fastball", TaggedPitchType)
+    ) %>%
+    dplyr::filter(!is.na(TaggedPitchType) & tolower(TaggedPitchType) != "undefined") %>%
+    force_pitch_levels()
+}
+
+pitch_data <- normalize_pitch_data_frame(pitch_data)
 log_startup_timing(sprintf("Completed type normalization/filtering (%d rows)", nrow(pitch_data)))
 
 # ---- Attach Cloudinary video URLs when available ----
@@ -28953,6 +28953,7 @@ deg_to_clock <- function(x) {
     if (is.null(base_df)) {
       base_df <- modified_pitch_data()
     }
+    base_df <- normalize_pitch_data_frame(base_df)
     base_df <- ensure_pitch_keys(base_df)
     mod_result <- tryCatch(load_pitch_modifications_db(base_df, verbose = FALSE), error = function(e) NULL)
     source_df <- if (!is.null(mod_result) && !is.null(mod_result$data)) mod_result$data else base_df
@@ -29085,6 +29086,7 @@ deg_to_clock <- function(x) {
       team_type = "All"
     ))
     if (is.null(base_df)) base_df <- pitch_data_pitching
+    base_df <- normalize_pitch_data_frame(base_df)
 
     # first, honor Session Type
     df <- apply_session_type_filter(base_df, input$sessionType)
