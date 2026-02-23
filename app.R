@@ -5901,14 +5901,22 @@ if (!"VideoClip3" %in% names(pitch_data)) pitch_data$VideoClip3 <- NA_character_
 
 # Combine EdgeR and manual/iPhone video maps
 video_maps <- list()
-if (file.exists(video_map_path)) {
+prefer_neon_video_map <- tolower(trimws(Sys.getenv("VIDEO_MAP_NEON_FIRST", "true"))) %in% c("1", "true", "yes")
+if (prefer_neon_video_map) {
+  neon_map <- tryCatch(video_map_read_all_neon(), error = function(e) tibble::tibble())
+  if (nrow(neon_map) > 0) {
+    video_maps[["neon"]] <- neon_map
+    message("📹 Loaded ", nrow(neon_map), " videos from Neon video_map table")
+  }
+}
+if (!length(video_maps) && file.exists(video_map_path)) {
   edger_raw <- suppressMessages(readr::read_csv(video_map_path, show_col_types = FALSE))
   if (nrow(edger_raw) > 0) {
     video_maps[["edger"]] <- edger_raw
     message("📹 Loaded ", nrow(edger_raw), " EdgeR videos")
   }
 }
-if (file.exists(manual_map_path)) {
+if (!length(video_maps) && file.exists(manual_map_path)) {
   manual_raw <- suppressMessages(readr::read_csv(manual_map_path, show_col_types = FALSE))
   if (nrow(manual_raw) > 0) {
     video_maps[["manual"]] <- manual_raw
