@@ -64,6 +64,9 @@ jobs:
         MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}
         MYSQL_PORT=3306
         MYSQL_SSL_CA=
+        # Optional startup-load limits for Neon reads (set via GitHub Secrets)
+        PITCH_DATA_MAX_DAYS=${{ secrets.PITCH_DATA_MAX_DAYS }}
+        PITCH_DATA_DB_LIMIT=${{ secrets.PITCH_DATA_DB_LIMIT }}
         # Persist shinymanager credentials between deploys
         CREDENTIALS_SQLITE_PATH=/home/shiny/credentials.sqlite
         EOF

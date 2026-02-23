@@ -63,11 +63,42 @@ deploy_app <- function() {
       })
     }
     
+    deployment_files <- rsconnect::listDeploymentFiles(".")
+    exclude_patterns <- c(
+      "^\\.cache/",
+      "^\\.github/",
+      "^\\.git/",
+      "^packrat/lib-R/",
+      "^data/practice/",
+      "^data/v3/",
+      "^automated_data_sync\\.R$",
+      "^trackman_api_sync\\.R$",
+      "^deploy_script\\.R$",
+      "^install_packages\\.R$",
+      "^install_email_package\\.R$",
+      "^requirements\\.R$",
+      "^setup_credentials\\.R$",
+      "^manage_exclusions\\.R$",
+      "^map_manual_video_uploads\\.R$",
+      "^upload_camera2_clips\\.R$",
+      "^fix_video_mapping\\.R$",
+      "^troubleshoot_modifications\\.R$",
+      "^backup_modifications\\.R$",
+      "^scripts/",
+      "^\\.DS_Store$",
+      "/\\.DS_Store$"
+    )
+    for (pat in exclude_patterns) {
+      deployment_files <- deployment_files[!grepl(pat, deployment_files)]
+    }
+    cat("Deployment file count after filtering:", length(deployment_files), "\n")
+
     # Deploy the app with better error handling
     cat("Deploying to shinyapps.io...\n")
     deployApp(
       appDir = ".",
       appName = "tmdata",
+      appFiles = deployment_files,
       forceUpdate = TRUE,
       launch.browser = FALSE,
       logLevel = "verbose"

@@ -2,3 +2,7 @@ renv.lock
 packrat/
 data/practice/
 data/v3/
+.cache/
+.github/
+.git/
+.DS_Store
