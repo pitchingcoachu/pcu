@@ -5985,10 +5985,23 @@ log_startup_timing("Completed video map merge/attachment")
 pitch_data <- ensure_pitch_keys(pitch_data)
 log_startup_timing("Computed/validated PitchKey values")
 rows_before_dedupe <- nrow(pitch_data)
-pitch_data <- deduplicate_pitch_rows(pitch_data)
-rows_after_dedupe <- nrow(pitch_data)
-rows_removed_dedupe <- rows_before_dedupe - rows_after_dedupe
-log_startup_timing(sprintf("Deduplicated pitch rows (removed=%d)", rows_removed_dedupe))
+dedupe_max_rows <- suppressWarnings(as.integer(Sys.getenv("STARTUP_DEDUP_MAX_ROWS", "150000")))
+if (!is.finite(dedupe_max_rows)) dedupe_max_rows <- 150000
+if (dedupe_max_rows > 0 && rows_before_dedupe > dedupe_max_rows) {
+  rows_after_dedupe <- rows_before_dedupe
+  rows_removed_dedupe <- 0L
+  message(
+    "Skipping startup deduplication because row count (", rows_before_dedupe,
+    ") exceeds STARTUP_DEDUP_MAX_ROWS=", dedupe_max_rows,
+    ". Set STARTUP_DEDUP_MAX_ROWS=0 to force dedupe."
+  )
+  log_startup_timing("Skipped startup deduplication")
+} else {
+  pitch_data <- deduplicate_pitch_rows(pitch_data)
+  rows_after_dedupe <- nrow(pitch_data)
+  rows_removed_dedupe <- rows_before_dedupe - rows_after_dedupe
+  log_startup_timing(sprintf("Deduplicated pitch rows (removed=%d)", rows_removed_dedupe))
+}
 
 # Friendly load message
 counts <- table(pitch_data$SessionType, useNA = "no")
