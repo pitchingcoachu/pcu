@@ -18,7 +18,9 @@ jobs:
       R_LIBS_USER: packrat/lib-R
       CSV_CACHE_ROOT: /home/runner/work/pcu/pcu/.cache/csv_sync
       DEPLOY_INSTALL_PACKAGES: "false"
-      PITCH_DATA_SYNC_ONLY_CHANGED: "true"
+      PITCH_DATA_SYNC_ONLY_CHANGED: ${{ vars.PITCH_DATA_SYNC_ONLY_CHANGED || 'true' }}
+      FORCE_NEON_PITCH_SYNC: ${{ vars.FORCE_NEON_PITCH_SYNC || 'false' }}
+      SYNC_LOOKBACK_DAYS: ${{ vars.SYNC_LOOKBACK_DAYS || '14' }}
     
     steps:
     - name: Checkout repository
@@ -128,10 +130,12 @@ jobs:
       env:
         R_LIBS_USER: packrat/lib-R
         CSV_CACHE_ROOT: /home/runner/work/pcu/pcu/.cache/csv_sync
-        PITCH_DATA_SYNC_ONLY_CHANGED: "true"
       run: |
         step_start=$(date +%s)
         echo "TIMER_START sync_gcu_data=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        echo "PITCH_DATA_SYNC_ONLY_CHANGED=$PITCH_DATA_SYNC_ONLY_CHANGED"
+        echo "FORCE_NEON_PITCH_SYNC=$FORCE_NEON_PITCH_SYNC"
+        echo "SYNC_LOOKBACK_DAYS=$SYNC_LOOKBACK_DAYS"
         Rscript automated_data_sync.R
         step_end=$(date +%s)
         echo "TIMER_END sync_gcu_data duration_sec=$((step_end-step_start))"
