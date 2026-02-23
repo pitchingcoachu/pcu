@@ -22,14 +22,22 @@ FTP_PASS <- "Wev4SdE2a8"
 FTP_USERPWD <- paste0(FTP_USER, ":", FTP_PASS)
 
 # Local data directories
-LOCAL_DATA_DIR      <- "data/"
-LOCAL_PRACTICE_DIR  <- file.path(LOCAL_DATA_DIR, "practice")
-LOCAL_V3_DIR        <- file.path(LOCAL_DATA_DIR, "v3")
+LOCAL_DATA_DIR <- "data/"
+USE_DATA_FOLDER_CACHE <- tolower(trimws(Sys.getenv("USE_DATA_FOLDER_CACHE", "false"))) %in% c("1", "true", "yes")
+CSV_CACHE_ROOT <- if (USE_DATA_FOLDER_CACHE) {
+  LOCAL_DATA_DIR
+} else {
+  Sys.getenv("CSV_CACHE_ROOT", file.path(tempdir(), "pcu_sync_cache"))
+}
+LOCAL_PRACTICE_DIR <- file.path(CSV_CACHE_ROOT, "practice")
+LOCAL_V3_DIR <- file.path(CSV_CACHE_ROOT, "v3")
 
 # Ensure data directories exist
 dir.create(LOCAL_DATA_DIR, recursive = TRUE, showWarnings = FALSE)
+dir.create(CSV_CACHE_ROOT, recursive = TRUE, showWarnings = FALSE)
 dir.create(LOCAL_PRACTICE_DIR, recursive = TRUE, showWarnings = FALSE)
 dir.create(LOCAL_V3_DIR, recursive = TRUE, showWarnings = FALSE)
+cat("CSV cache root:", CSV_CACHE_ROOT, "\n")
 
 # Function to list files in FTP directory
 list_ftp_files <- function(ftp_path) {
@@ -255,7 +263,7 @@ deduplicate_files <- function() {
   cat("Starting deduplication process...\n")
   
   # Get all CSV files in the data directory
-  csv_files <- list.files(LOCAL_DATA_DIR, pattern = "\\.csv$", full.names = TRUE, recursive = TRUE)
+  csv_files <- list.files(CSV_CACHE_ROOT, pattern = "\\.csv$", full.names = TRUE, recursive = TRUE)
   
   if (length(csv_files) == 0) {
     cat("No CSV files found for deduplication\n")
@@ -345,7 +353,7 @@ main_sync <- function() {
   last_sync_file <- file.path(LOCAL_DATA_DIR, "last_sync.txt")
   if (!file.exists(last_sync_file)) {
     cat("First run detected - cleaning old data files\n")
-    old_files <- list.files(LOCAL_DATA_DIR, pattern = "\\.(csv|txt)$", full.names = TRUE, recursive = TRUE)
+    old_files <- list.files(CSV_CACHE_ROOT, pattern = "\\.(csv|txt)$", full.names = TRUE, recursive = TRUE)
     if (length(old_files) > 0) {
       file.remove(old_files)
       cat("Cleaned", length(old_files), "old data files\n")
@@ -385,6 +393,27 @@ main_sync <- function() {
   )
   if (video_updated) {
     cat("Regenerated data/video_map.csv from Neon video metadata\n")
+  }
+
+  push_to_neon <- tolower(trimws(Sys.getenv("SYNC_PITCH_DATA_TO_NEON", "true"))) %in% c("1", "true", "yes")
+  if (push_to_neon && (practice_updated || v3_updated)) {
+    neon_sync_script <- file.path("scripts", "sync_pitch_data_to_neon.R")
+    if (file.exists(neon_sync_script)) {
+      cat("Syncing pitch CSV history to Neon table...\n")
+      neon_status <- tryCatch(
+        system2(
+          "Rscript",
+          neon_sync_script,
+          stdout = TRUE,
+          stderr = TRUE,
+          env = c(sprintf("PITCH_DATA_SYNC_DIR=%s", CSV_CACHE_ROOT))
+        ),
+        error = function(e) paste("Neon sync failed:", e$message)
+      )
+      cat(paste(neon_status, collapse = "\n"), "\n")
+    } else {
+      cat("Skipping Neon pitch sync; missing script:", neon_sync_script, "\n")
+    }
   }
   
   # Return TRUE if any data was updated
