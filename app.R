@@ -5818,11 +5818,15 @@ draw_heat <- function(grid, bins = HEAT_BINS, pal_fun = heat_pal_red,
 # Neon-only pitch data loading (no data/practice or data/v3 fallback)
 pitch_data <- fetch_pitch_data_neon()
 if (is.null(pitch_data)) {
-  stop(
-    "Unable to load pitch data from Neon. Configure PITCH_DATA_DB_* env vars and ensure table ",
-    pitch_data_table_name(),
-    " exists."
+  warning(
+    paste0(
+      "Unable to load pitch data from Neon at startup. ",
+      "Starting with empty pitch dataset. Check PITCH_DATA_DB_* env vars and table ",
+      pitch_data_table_name(),
+      "."
+    )
   )
+  pitch_data <- data.frame(stringsAsFactors = FALSE)
 }
 log_startup_timing(sprintf("Loaded %d rows from Neon pitch table", nrow(pitch_data)))
 

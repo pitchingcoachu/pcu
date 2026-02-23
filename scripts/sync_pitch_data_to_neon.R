@@ -379,6 +379,8 @@ main <- function() {
 
   t_state_start <- Sys.time()
   ensure_sync_state_table(con, state_table_ref)
+  # Ensure base target table exists even if no files are changed this run.
+  ensure_table(con, table_ref, character(0))
   state <- load_sync_state(con, state_table_ref)
   files_to_sync <- select_files_to_sync(metadata, state, only_changed = only_changed)
   message(sprintf("TIMING state_filter_sec: %.2f", as.numeric(difftime(Sys.time(), t_state_start, units = "secs"))))
