@@ -5297,6 +5297,8 @@ log_startup_timing("Begin data import")
 data_parent <- normalizePath(file.path(getwd(), "data"), mustWork = TRUE)
 pitch_data_backend_result <- NULL
 pitch_data_loaded_from_backend <- FALSE
+backend_mode <- tolower(trimws(Sys.getenv("PITCH_DATA_BACKEND", "auto")))
+postgres_backend_required <- backend_mode %in% c("postgres", "neon", "pg")
 
 pitch_data_backend_result <- tryCatch(
   load_pitch_data_with_backend(
@@ -5305,7 +5307,7 @@ pitch_data_backend_result <- tryCatch(
     startup_logger = log_startup_timing
   ),
   error = function(e) {
-    message("Pitch data backend init error, falling back to CSV: ", e$message)
+    message("Pitch data backend init error: ", e$message)
     NULL
   }
 )
@@ -5324,6 +5326,12 @@ if (!is.null(pitch_data_backend_result) &&
 
 # Find every CSV under data/, keep only those under practice/ or V3/
 if (!pitch_data_loaded_from_backend) {
+  if (isTRUE(postgres_backend_required)) {
+    stop(
+      "PITCH_DATA_BACKEND=", backend_mode,
+      " is enabled but backend load returned no data. CSV fallback is disabled in Postgres mode."
+    )
+  }
   all_csvs <- list.files(
     path       = data_parent,
     pattern    = "\\.csv$",

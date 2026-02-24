@@ -243,8 +243,8 @@ pitch_data_table_ident <- function(con) {
 }
 
 pitch_data_table_columns <- function(con, tbl = pitch_data_table_ident(con)) {
-  schema <- tbl@name[[1]]
-  table <- tbl@name[[2]]
+  schema <- gsub("[^A-Za-z0-9_]", "_", Sys.getenv("PITCH_DATA_DB_SCHEMA", "public"))
+  table <- gsub("[^A-Za-z0-9_]", "_", Sys.getenv("PITCH_DATA_DB_TABLE", "pitch_events"))
   sql <- sprintf(
     "SELECT column_name
      FROM information_schema.columns
@@ -296,6 +296,25 @@ pitch_data_load_cached <- function(path, ttl_sec) {
   tryCatch(readRDS(path), error = function(...) NULL)
 }
 
+pitch_data_load_latest_cache_any <- function(school_code = "") {
+  dir <- Sys.getenv("PITCH_DATA_CACHE_DIR", "/tmp")
+  dir <- path.expand(dir)
+  if (!dir.exists(dir)) return(NULL)
+  sc <- toupper(trimws(ifelse(is.null(school_code) || !nzchar(school_code), "ALL", school_code)))
+  patt <- sprintf("^pitch_data_cache_%s_.*\\.rds$", sc)
+  files <- list.files(dir, pattern = patt, full.names = TRUE)
+  if (!length(files)) return(NULL)
+  info <- file.info(files)
+  files <- files[order(info$mtime, decreasing = TRUE)]
+  for (f in files) {
+    obj <- tryCatch(readRDS(f), error = function(...) NULL)
+    if (is.list(obj) && !is.null(obj$data) && is.data.frame(obj$data) && nrow(obj$data) > 0) {
+      return(obj)
+    }
+  }
+  NULL
+}
+
 pitch_data_save_cache <- function(path, obj) {
   tmp <- paste0(path, ".tmp")
   ok <- tryCatch({
@@ -309,6 +328,7 @@ pitch_data_save_cache <- function(path, obj) {
 pitch_data_build_select_sql <- function(con, cols_present, school_code, start_date = NULL, end_date = NULL, chunk_size = 100000L, key_state = NULL) {
   all_cols <- pitch_data_default_columns()
   name_map <- pitch_data_storage_name_map()
+  if (!length(cols_present)) cols_present <- character(0)
   cols_lower <- tolower(cols_present)
 
   first_match_col <- function(name) {
@@ -332,7 +352,8 @@ pitch_data_build_select_sql <- function(con, cols_present, school_code, start_da
 
   app_sel <- vapply(all_cols, function(col) {
     db_col <- resolve_col(col)
-    if (is.null(db_col) && !is.na(name_map[[col]])) db_col <- resolve_col(name_map[[col]])
+    mapped <- unname(name_map[col])
+    if (is.null(db_col) && length(mapped) == 1L && !is.na(mapped) && nzchar(mapped)) db_col <- resolve_col(mapped)
     if (is.null(db_col) && identical(col, "SessionType")) db_col <- resolve_col("session_type")
     if (!is.null(db_col)) {
       sprintf(
@@ -422,6 +443,7 @@ pitch_data_fetch_range <- function(cfg, school_code, start_date = NULL, end_date
   if (!DBI::dbExistsTable(con, tbl)) return(data.frame())
 
   cols_present <- pitch_data_table_columns(con, tbl)
+  if (!length(cols_present)) return(data.frame())
   out <- list()
   key_state <- NULL
 
@@ -442,11 +464,12 @@ pitch_data_fetch_range <- function(cfg, school_code, start_date = NULL, end_date
     out[[length(out) + 1L]] <- chunk
 
     if (q$has_id) {
+      if (!"id" %in% names(chunk)) break
       key_state <- list(
         id = suppressWarnings(as.integer(chunk$id[nrow(chunk)])),
         session_date = if (q$has_session_date) chunk$session_date[nrow(chunk)] else NULL
       )
-      if (is.na(key_state$id)) break
+      if (!length(key_state$id) || is.na(key_state$id)) break
     } else {
       break
     }
@@ -485,10 +508,13 @@ pitch_data_monthly_ranges <- function(con, school_code = "") {
     where
   )
   mm <- tryCatch(DBI::dbGetQuery(con, sql, immediate = TRUE), error = function(e) NULL)
-  if (is.null(mm) || !nrow(mm) || is.na(mm$min_date[[1]]) || is.na(mm$max_date[[1]])) return(list())
+  if (is.null(mm) || !nrow(mm) || !"min_date" %in% names(mm) || !"max_date" %in% names(mm)) return(list())
+  min_date <- mm$min_date[1]
+  max_date <- mm$max_date[1]
+  if (is.na(min_date) || is.na(max_date)) return(list())
 
-  start <- as.Date(mm$min_date[[1]])
-  end <- as.Date(mm$max_date[[1]])
+  start <- as.Date(min_date)
+  end <- as.Date(max_date)
   if (!is.finite(as.numeric(start)) || !is.finite(as.numeric(end))) return(list())
 
   first_month <- as.Date(format(start, "%Y-%m-01"))
@@ -612,6 +638,11 @@ load_pitch_data_with_backend <- function(local_data_dir = file.path(getwd(), "da
 
   if (!is.null(last_err)) {
     pitch_data_logger(startup_logger, paste("Neon load failed, fallback to CSV:", last_err$message))
+  }
+  stale <- pitch_data_load_latest_cache_any(school_code = school_code)
+  if (!is.null(stale)) {
+    pitch_data_logger(startup_logger, sprintf("Using stale cached pitch_data snapshot (%d rows) after Neon failure", nrow(stale$data)))
+    return(stale)
   }
   NULL
 }
