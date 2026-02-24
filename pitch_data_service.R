@@ -242,6 +242,24 @@ pitch_data_table_ident <- function(con) {
   DBI::Id(schema = schema, table = table)
 }
 
+pitch_data_table_columns <- function(con, tbl = pitch_data_table_ident(con)) {
+  schema <- tbl@name[[1]]
+  table <- tbl@name[[2]]
+  sql <- sprintf(
+    "SELECT column_name
+     FROM information_schema.columns
+     WHERE table_schema = %s AND table_name = %s
+     ORDER BY ordinal_position",
+    as.character(DBI::dbQuoteLiteral(con, schema)),
+    as.character(DBI::dbQuoteLiteral(con, table))
+  )
+  cols <- tryCatch(DBI::dbGetQuery(con, sql, immediate = TRUE)$column_name, error = function(e) character(0))
+  cols <- as.character(cols)
+  cols <- cols[nzchar(cols)]
+  if (length(cols)) return(cols)
+  tryCatch(DBI::dbListFields(con, tbl), error = function(e) character(0))
+}
+
 pitch_data_cache_file <- function(school_code = "") {
   dir <- Sys.getenv("PITCH_DATA_CACHE_DIR", "/tmp")
   dir <- path.expand(dir)
@@ -293,14 +311,24 @@ pitch_data_build_select_sql <- function(con, cols_present, school_code, start_da
   name_map <- pitch_data_storage_name_map()
   cols_lower <- tolower(cols_present)
 
-  resolve_col <- function(name) {
-    idx <- match(tolower(name), cols_lower)
-    if (is.na(idx)) NULL else cols_present[[idx]]
+  first_match_col <- function(name) {
+    hits <- which(cols_lower == tolower(name))
+    if (!length(hits)) return(NULL)
+    exact_hits <- hits[cols_present[hits] == name]
+    pick <- if (length(exact_hits)) exact_hits[[1]] else hits[[1]]
+    cols_present[[pick]]
   }
 
-  has_school <- "school_code" %in% cols_present
-  has_session_date <- "session_date" %in% cols_present
-  has_id <- "id" %in% cols_present
+  resolve_col <- function(name) {
+    first_match_col(name)
+  }
+
+  school_col <- resolve_col("school_code")
+  session_date_col <- resolve_col("session_date")
+  id_col <- resolve_col("id")
+  has_school <- !is.null(school_col)
+  has_session_date <- !is.null(session_date_col)
+  has_id <- !is.null(id_col)
 
   app_sel <- vapply(all_cols, function(col) {
     db_col <- resolve_col(col)
@@ -318,19 +346,33 @@ pitch_data_build_select_sql <- function(con, cols_present, school_code, start_da
   }, character(1))
 
   meta_sel <- c()
-  if (has_id) meta_sel <- c(meta_sel, as.character(DBI::dbQuoteIdentifier(con, "id")))
-  if (has_session_date) meta_sel <- c(meta_sel, as.character(DBI::dbQuoteIdentifier(con, "session_date")))
+  if (has_id) {
+    meta_sel <- c(meta_sel, sprintf("%s AS %s",
+                                    as.character(DBI::dbQuoteIdentifier(con, id_col)),
+                                    as.character(DBI::dbQuoteIdentifier(con, "id"))))
+  }
+  if (has_session_date) {
+    meta_sel <- c(meta_sel, sprintf("%s AS %s",
+                                    as.character(DBI::dbQuoteIdentifier(con, session_date_col)),
+                                    as.character(DBI::dbQuoteIdentifier(con, "session_date"))))
+  }
   sel <- c(meta_sel, app_sel)
 
   where <- c("TRUE")
   if (has_school && nzchar(school_code)) {
-    where <- c(where, sprintf("school_code = %s", as.character(DBI::dbQuoteLiteral(con, school_code))))
+    where <- c(where, sprintf("%s = %s",
+                              as.character(DBI::dbQuoteIdentifier(con, school_col)),
+                              as.character(DBI::dbQuoteLiteral(con, school_code))))
   }
   if (has_session_date && !is.null(start_date)) {
-    where <- c(where, sprintf("session_date >= %s", as.character(DBI::dbQuoteLiteral(con, as.character(start_date)))))
+    where <- c(where, sprintf("%s >= %s",
+                              as.character(DBI::dbQuoteIdentifier(con, session_date_col)),
+                              as.character(DBI::dbQuoteLiteral(con, as.character(start_date)))))
   }
   if (has_session_date && !is.null(end_date)) {
-    where <- c(where, sprintf("session_date < %s", as.character(DBI::dbQuoteLiteral(con, as.character(end_date)))))
+    where <- c(where, sprintf("%s < %s",
+                              as.character(DBI::dbQuoteIdentifier(con, session_date_col)),
+                              as.character(DBI::dbQuoteLiteral(con, as.character(end_date)))))
   }
 
   if (!is.null(key_state) && has_id) {
@@ -338,19 +380,24 @@ pitch_data_build_select_sql <- function(con, cols_present, school_code, start_da
       key_date <- as.character(DBI::dbQuoteLiteral(con, as.character(key_state$session_date)))
       where <- c(
         where,
-        sprintf("(session_date < %s OR (session_date = %s AND id < %d))", key_date, key_date, as.integer(key_state$id))
+        sprintf("(%s < %s OR (%s = %s AND %s < %d))",
+                as.character(DBI::dbQuoteIdentifier(con, session_date_col)), key_date,
+                as.character(DBI::dbQuoteIdentifier(con, session_date_col)), key_date,
+                as.character(DBI::dbQuoteIdentifier(con, id_col)), as.integer(key_state$id))
       )
     } else if (!is.null(key_state$id)) {
-      where <- c(where, sprintf("id < %d", as.integer(key_state$id)))
+      where <- c(where, sprintf("%s < %d", as.character(DBI::dbQuoteIdentifier(con, id_col)), as.integer(key_state$id)))
     }
   }
 
   order_clause <- if (has_session_date && has_id) {
-    "ORDER BY session_date DESC NULLS LAST, id DESC"
+    sprintf("ORDER BY %s DESC NULLS LAST, %s DESC",
+            as.character(DBI::dbQuoteIdentifier(con, session_date_col)),
+            as.character(DBI::dbQuoteIdentifier(con, id_col)))
   } else if (has_id) {
-    "ORDER BY id DESC"
+    sprintf("ORDER BY %s DESC", as.character(DBI::dbQuoteIdentifier(con, id_col)))
   } else if (has_session_date) {
-    "ORDER BY session_date DESC NULLS LAST"
+    sprintf("ORDER BY %s DESC NULLS LAST", as.character(DBI::dbQuoteIdentifier(con, session_date_col)))
   } else {
     ""
   }
@@ -374,7 +421,7 @@ pitch_data_fetch_range <- function(cfg, school_code, start_date = NULL, end_date
   tbl <- pitch_data_table_ident(con)
   if (!DBI::dbExistsTable(con, tbl)) return(data.frame())
 
-  cols_present <- DBI::dbListFields(con, tbl)
+  cols_present <- pitch_data_table_columns(con, tbl)
   out <- list()
   key_state <- NULL
 
@@ -412,16 +459,28 @@ pitch_data_fetch_range <- function(cfg, school_code, start_date = NULL, end_date
 pitch_data_monthly_ranges <- function(con, school_code = "") {
   tbl <- pitch_data_table_ident(con)
   if (!DBI::dbExistsTable(con, tbl)) return(list())
-  cols_present <- DBI::dbListFields(con, tbl)
-  if (!"session_date" %in% cols_present) return(list())
+  cols_present <- pitch_data_table_columns(con, tbl)
+  cols_lower <- tolower(cols_present)
+  find_col <- function(name) {
+    hits <- which(cols_lower == tolower(name))
+    if (!length(hits)) return(NULL)
+    cols_present[[hits[[1]]]]
+  }
+  session_date_col <- find_col("session_date")
+  school_col <- find_col("school_code")
+  if (is.null(session_date_col)) return(list())
 
   where <- "TRUE"
-  if ("school_code" %in% cols_present && nzchar(school_code)) {
-    where <- sprintf("school_code = %s", as.character(DBI::dbQuoteLiteral(con, school_code)))
+  if (!is.null(school_col) && nzchar(school_code)) {
+    where <- sprintf("%s = %s",
+                     as.character(DBI::dbQuoteIdentifier(con, school_col)),
+                     as.character(DBI::dbQuoteLiteral(con, school_code)))
   }
 
   sql <- sprintf(
-    "SELECT min(session_date) AS min_date, max(session_date) AS max_date FROM %s WHERE %s",
+    "SELECT min(%s) AS min_date, max(%s) AS max_date FROM %s WHERE %s",
+    as.character(DBI::dbQuoteIdentifier(con, session_date_col)),
+    as.character(DBI::dbQuoteIdentifier(con, session_date_col)),
     as.character(DBI::dbQuoteIdentifier(con, tbl)),
     where
   )
