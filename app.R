@@ -1464,6 +1464,10 @@ deduplicate_pitch_rows <- function(df) {
   df <- ensure_pitch_keys(df)
   if (!"PitchKey" %in% names(df)) return(df)
   if (!any(!is.na(df$PitchKey) & nzchar(as.character(df$PitchKey)))) return(df)
+  key_chr <- as.character(df$PitchKey)
+  key_valid <- !is.na(key_chr) & nzchar(key_chr)
+  # Fast-path: skip expensive grouped dedupe when keys are already unique.
+  if (!anyDuplicated(key_chr[key_valid])) return(df)
 
   # Keep the most complete row per PitchKey in case duplicate files differ slightly.
   present_score <- function(x) {
@@ -1493,6 +1497,54 @@ deduplicate_pitch_rows <- function(df) {
     dplyr::arrange(.row_id) %>%
     dplyr::select(-.row_id, -.dedupe_score)
 
+  out
+}
+
+mod_datetime_to_numeric <- function(x) {
+  if (is.null(x) || !length(x)) return(numeric(0))
+
+  if (is.list(x)) {
+    x <- unlist(x, recursive = TRUE, use.names = FALSE)
+  }
+
+  if (inherits(x, "POSIXt")) {
+    num <- suppressWarnings(as.numeric(x))
+    num[!is.finite(num)] <- NA_real_
+    return(num)
+  }
+
+  num_raw <- suppressWarnings(as.numeric(x))
+  has_num <- is.finite(num_raw)
+  out <- rep(NA_real_, length(num_raw))
+  if (any(has_num)) {
+    vals <- num_raw[has_num]
+    vals[vals > 1e12] <- vals[vals > 1e12] / 1000
+    out[has_num] <- vals
+  }
+
+  ch <- trimws(as.character(x))
+  ch[ch %in% c("", "NA", "NaN", "NULL", "null")] <- NA_character_
+  need_parse <- !is.na(ch) & !has_num
+  if (any(need_parse)) {
+    parsed <- suppressWarnings(as.POSIXct(
+      ch[need_parse],
+      tz = "UTC",
+      tryFormats = c(
+        "%Y-%m-%d %H:%M:%OS",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M:%OSZ",
+        "%Y-%m-%dT%H:%M:%S%z",
+        "%m/%d/%Y %H:%M:%S",
+        "%m/%d/%y %H:%M:%S",
+        "%Y-%m-%d",
+        "%m/%d/%Y",
+        "%m/%d/%y"
+      )
+    ))
+    out[need_parse] <- suppressWarnings(as.numeric(parsed))
+  }
+
+  out[!is.finite(out)] <- NA_real_
   out
 }
 
@@ -1585,8 +1637,8 @@ deduplicate_mod_rows <- function(mods_df) {
   fallback <- mod_row_signature(mods_df)
   mods_df$.dedupe_group <- ifelse(keyed, paste0("k:", key), paste0("f:", fallback))
 
-  mod_ts <- suppressWarnings(as.numeric(as.POSIXct(mods_df$modified_at, tz = "UTC")))
-  created_ts <- suppressWarnings(as.numeric(as.POSIXct(mods_df$created_at, tz = "UTC")))
+  mod_ts <- mod_datetime_to_numeric(mods_df$modified_at)
+  created_ts <- mod_datetime_to_numeric(mods_df$created_at)
   rank_ts <- mod_ts
   missing_rank <- !is.finite(rank_ts)
   rank_ts[missing_rank] <- created_ts[missing_rank]
@@ -2048,13 +2100,8 @@ mod_memo <- function(mods_df) {
   }
   safe_dt <- function(x) {
     tryCatch({
-      v <- as.character(x)
-      out <- suppressWarnings(lubridate::parse_date_time(
-        v,
-        orders = c("ymd HMS", "mdy HMS", "dmy HMS", "ymd HM", "mdy HM", "dmy HM", "ymd", "mdy", "dmy"),
-        tz = "UTC"
-      ))
-      as.POSIXct(out, tz = "UTC")
+      num <- mod_datetime_to_numeric(x)
+      as.POSIXct(num, origin = "1970-01-01", tz = "UTC")
     }, error = function(...) as.POSIXct(NA))
   }
   mods_df$date <- safe_date(mods_df$date)
@@ -5735,7 +5782,20 @@ if (rows_removed_dedupe > 0) {
 # Read lookup table and keep Email in a separate column to avoid .x/.y
 lookup_table <- if (file.exists("lookup_table.csv")) {
   read.csv("lookup_table.csv", stringsAsFactors = FALSE) %>%
-    dplyr::rename(Pitcher = PlayerName, Email_lookup = Email)
+    dplyr::rename(Pitcher = PlayerName, Email_lookup = Email) %>%
+    dplyr::mutate(
+      Pitcher = trimws(as.character(Pitcher)),
+      Email_lookup = trimws(as.character(Email_lookup))
+    ) %>%
+    dplyr::filter(!is.na(Pitcher), nzchar(Pitcher)) %>%
+    dplyr::group_by(Pitcher) %>%
+    dplyr::summarise(
+      Email_lookup = {
+        vals <- unique(Email_lookup[!is.na(Email_lookup) & nzchar(Email_lookup)])
+        if (length(vals)) vals[[1]] else NA_character_
+      },
+      .groups = "drop"
+    )
 } else {
   data.frame(Pitcher = character(), Email_lookup = character(), stringsAsFactors = FALSE)
 }
