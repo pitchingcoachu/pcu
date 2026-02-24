@@ -5758,9 +5758,14 @@ log_startup_timing("Completed video map merge/attachment")
 pitch_data <- ensure_pitch_keys(pitch_data)
 log_startup_timing("Computed/validated PitchKey values")
 rows_before_dedupe <- nrow(pitch_data)
-pitch_data <- deduplicate_pitch_rows(pitch_data, fast = isTRUE(pitch_data_loaded_from_backend))
+if (isTRUE(pitch_data_loaded_from_backend)) {
+  # Backend data is already canonicalized; avoid expensive startup dedupe in app process.
+  rows_removed_dedupe <- 0L
+} else {
+  pitch_data <- deduplicate_pitch_rows(pitch_data, fast = FALSE)
+  rows_removed_dedupe <- rows_before_dedupe - nrow(pitch_data)
+}
 rows_after_dedupe <- nrow(pitch_data)
-rows_removed_dedupe <- rows_before_dedupe - rows_after_dedupe
 log_startup_timing(sprintf("Deduplicated pitch rows (removed=%d)", rows_removed_dedupe))
 
 # Friendly load message
@@ -21797,7 +21802,7 @@ load_manual_velocity_entries <- function(app_id = current_school()) {
   }
 
   if (!"id" %in% names(df)) df$id <- sprintf("legacy_%s", seq_len(nrow(df)))
-  if (!"app_id" %in% names(df)) df$app_id <- app_id
+  if (!"app_id" %in% names(df)) df$app_id <- rep(app_id, nrow(df))
   if (!"entry_date" %in% names(df)) df$entry_date <- as.Date(NA_real_)[seq_len(nrow(df))]
   if (!"pitcher" %in% names(df)) df$pitcher <- character(nrow(df))
   if (!"throw_type" %in% names(df)) df$throw_type <- character(nrow(df))
@@ -21805,10 +21810,10 @@ load_manual_velocity_entries <- function(app_id = current_school()) {
   if (!"ball_weight_oz" %in% names(df)) df$ball_weight_oz <- NA_real_
   if (!"velocity_mph" %in% names(df)) df$velocity_mph <- NA_real_
   if (!"notes" %in% names(df)) df$notes <- character(nrow(df))
-  if (!"created_at" %in% names(df)) df$created_at <- as.character(Sys.time())
+  if (!"created_at" %in% names(df)) df$created_at <- rep(as.character(Sys.time()), nrow(df))
   df <- df %>%
     dplyr::mutate(
-      app_id = as.character(app_id),
+      app_id = rep(as.character(app_id), dplyr::n()),
       entry_date = suppressWarnings(as.Date(entry_date)),
       pitcher = as.character(pitcher %||% ""),
       throw_type = as.character(throw_type %||% ""),
@@ -21829,7 +21834,7 @@ save_manual_velocity_entries <- function(entries, app_id = current_school()) {
   normalize_manual_velocity_types <- function(df) {
     if (is.null(df) || !nrow(df)) return(as.data.frame(df, stringsAsFactors = FALSE))
     if (!"id" %in% names(df)) df$id <- sprintf("mv_legacy_%s", seq_len(nrow(df)))
-    if (!"app_id" %in% names(df)) df$app_id <- app_id
+    if (!"app_id" %in% names(df)) df$app_id <- rep(app_id, nrow(df))
     if (!"entry_date" %in% names(df)) df$entry_date <- as.Date(NA_real_)[seq_len(nrow(df))]
     if (!"pitcher" %in% names(df)) df$pitcher <- character(nrow(df))
     if (!"throw_type" %in% names(df)) df$throw_type <- character(nrow(df))
@@ -21837,7 +21842,7 @@ save_manual_velocity_entries <- function(entries, app_id = current_school()) {
     if (!"ball_weight_oz" %in% names(df)) df$ball_weight_oz <- NA_real_
     if (!"velocity_mph" %in% names(df)) df$velocity_mph <- NA_real_
     if (!"notes" %in% names(df)) df$notes <- character(nrow(df))
-    if (!"created_at" %in% names(df)) df$created_at <- as.character(Sys.time())
+    if (!"created_at" %in% names(df)) df$created_at <- rep(as.character(Sys.time()), nrow(df))
     df %>%
       dplyr::mutate(
         id = as.character(id),
