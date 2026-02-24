@@ -5,3 +5,13 @@ MYSQL_USER=pitchingcoachu
 MYSQL_HOST=pitchingcoachu.c3qwye0w6psf.us-west-1.rds.amazonaws.com
 MYSQL_PASSWORD=giqxyx-zoqdos-coqSo1
 MYSQL_DB=pitchingcoachu
+TEAM_CODE=PCU
+
+# Neon/Postgres pitch-data backend
+PITCH_DATA_BACKEND=postgres
+PITCH_DATA_DB_URL=postgresql://neondb_owner:npg_PDj8F0GLUuhy@ep-blue-forest-afzze9m1-pooler.c-2.us-west-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require
+PITCH_DATA_PARALLEL_WORKERS=2
+PITCH_DATA_CHUNK_SIZE=100000
+PITCH_DATA_CACHE_TTL_SEC=900
+PITCH_DATA_SYNC_AFTER_FTP=1
+PITCH_DATA_SYNC_WORKERS=2

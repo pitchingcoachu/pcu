@@ -13,6 +13,9 @@ library(stringr)
 # Load CSV filtering utilities
 source("csv_filter_utils.R")
 source("video_map_helpers.R")
+if (file.exists("pitch_data_service.R")) {
+  source("pitch_data_service.R")
+}
 # FTP credentials
 FTP_HOST <- "ftp.trackmanbaseball.com"
 FTP_USER <- "Jared Gaynor"
@@ -24,6 +27,8 @@ FTP_USERPWD <- paste0(FTP_USER, ":", FTP_PASS)
 LOCAL_DATA_DIR      <- "data/"
 LOCAL_PRACTICE_DIR  <- file.path(LOCAL_DATA_DIR, "practice")
 LOCAL_V3_DIR        <- file.path(LOCAL_DATA_DIR, "v3")
+SYNC_START_YEAR <- suppressWarnings(as.integer(Sys.getenv("TM_SYNC_START_YEAR", "2024")))
+if (is.na(SYNC_START_YEAR) || SYNC_START_YEAR < 2000) SYNC_START_YEAR <- 2024
 
 # Ensure data directories exist
 dir.create(LOCAL_DATA_DIR, recursive = TRUE, showWarnings = FALSE)
@@ -95,7 +100,7 @@ download_csv <- function(remote_file, local_file) {
 # Function to sync practice data (2025 folder with MM/DD structure)
 sync_practice_data <- function() {
   cat("Syncing practice data...\n")
-  years <- as.character(2025:year(Sys.Date()))
+  years <- as.character(SYNC_START_YEAR:year(Sys.Date()))
   downloaded_count <- 0
   
   for (yr in years) {
@@ -150,17 +155,15 @@ is_date_in_range <- function(file_path) {
   
   file_date <- as.Date(paste(date_match[2], date_match[3], date_match[4], sep = "-"))
   
-  # Start date: August 1, 2025 (nothing before this)
-  start_date <- as.Date("2024-08-01")
-  
-  # Include all data from August 1, 2025 onwards (no future year restrictions)
+  # Include all data from configured sync start year onward.
+  start_date <- as.Date(sprintf("%04d-01-01", SYNC_START_YEAR))
   return(file_date >= start_date)
 }
 
 # Function to sync v3 data with date filtering
 sync_v3_data <- function() {
   cat("Syncing v3 data with date filtering...\n")
-  years <- as.character(2025:year(Sys.Date()))
+  years <- as.character(SYNC_START_YEAR:year(Sys.Date()))
   downloaded_count <- 0
   seen_v3_files <- character(0)
   
@@ -513,9 +516,41 @@ main_sync <- function() {
   if (video_updated) {
     cat("Regenerated data/video_map.csv from Neon video metadata\n")
   }
+
+  pitch_neon_updated <- FALSE
+  pitch_sync_enabled <- tryCatch(
+    if (exists("pitch_data_parse_bool", mode = "function")) {
+      pitch_data_parse_bool(Sys.getenv("PITCH_DATA_SYNC_AFTER_FTP", "1"), default = TRUE)
+    } else {
+      TRUE
+    },
+    error = function(e) TRUE
+  )
+  if (pitch_sync_enabled && exists("sync_csv_tree_to_neon", mode = "function")) {
+    backend_type <- tryCatch({
+      cfg <- pitch_data_backend_config()
+      if (is.null(cfg$type)) "csv" else cfg$type
+    }, error = function(e) "csv")
+
+    if (identical(backend_type, "postgres")) {
+      workers <- suppressWarnings(as.integer(Sys.getenv("PITCH_DATA_SYNC_WORKERS", "2")))
+      if (is.na(workers) || workers < 1L) workers <- 2L
+      tryCatch({
+        sync_csv_tree_to_neon(
+          data_dir = LOCAL_DATA_DIR,
+          school_code = Sys.getenv("TEAM_CODE", "OSU"),
+          workers = workers
+        )
+        pitch_neon_updated <- TRUE
+        cat("Synced local pitch CSVs into Neon pitch_events\n")
+      }, error = function(e) {
+        cat("Skipping Neon pitch sync:", e$message, "\n")
+      })
+    }
+  }
   
   # Return TRUE if any data was updated
-  return(practice_updated || v3_updated || video_updated)
+  return(practice_updated || v3_updated || video_updated || pitch_neon_updated)
 }
 
 # Run if called directly

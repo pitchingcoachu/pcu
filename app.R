@@ -889,6 +889,7 @@ library(RSQLite)  # for SQLite database
 
 # Source helper for mapping uploads
 source("video_map_helpers.R")
+source("pitch_data_service.R")
 
 # Configure Cloudinary (recommended simple host for images/videos)
 # Create a free account, make an *unsigned upload preset*, then set these:
@@ -5247,18 +5248,48 @@ log_startup_timing("Begin data import")
 
 # Point to the app's local data folder (works locally & on shinyapps.io)
 data_parent <- normalizePath(file.path(getwd(), "data"), mustWork = TRUE)
+pitch_data_backend_result <- NULL
+pitch_data_loaded_from_backend <- FALSE
+
+pitch_data_backend_result <- tryCatch(
+  load_pitch_data_with_backend(
+    local_data_dir = data_parent,
+    school_code = current_school(),
+    startup_logger = log_startup_timing
+  ),
+  error = function(e) {
+    message("Pitch data backend init error, falling back to CSV: ", e$message)
+    NULL
+  }
+)
+
+if (!is.null(pitch_data_backend_result) &&
+    is.list(pitch_data_backend_result) &&
+    !is.null(pitch_data_backend_result$data)) {
+  pitch_data <- pitch_data_backend_result$data
+  all_csvs <- unique(as.character(pitch_data_backend_result$source_files %||% character(0)))
+  pitch_data_loaded_from_backend <- TRUE
+  log_startup_timing(sprintf(
+    "Loaded pitch_data from backend (%d rows, %d source files)",
+    nrow(pitch_data), length(all_csvs)
+  ))
+}
 
 # Find every CSV under data/, keep only those under practice/ or V3/
-all_csvs <- list.files(
-  path       = data_parent,
-  pattern    = "\\.csv$",
-  recursive  = TRUE,
-  full.names = TRUE
-)
-all_csvs <- all_csvs[ grepl("([/\\\\]practice[/\\\\])|([/\\\\]v3[/\\\\])", tolower(all_csvs)) ]
-log_startup_timing(sprintf("Discovered %d practice/v3 CSV files", length(all_csvs)))
+if (!pitch_data_loaded_from_backend) {
+  all_csvs <- list.files(
+    path       = data_parent,
+    pattern    = "\\.csv$",
+    recursive  = TRUE,
+    full.names = TRUE
+  )
+  all_csvs <- all_csvs[ grepl("([/\\\\]practice[/\\\\])|([/\\\\]v3[/\\\\])", tolower(all_csvs)) ]
+  log_startup_timing(sprintf("Discovered %d practice/v3 CSV files", length(all_csvs)))
 
-if (!length(all_csvs)) stop("No CSVs found under: ", data_parent)
+  if (!length(all_csvs)) stop("No CSVs found under: ", data_parent)
+} else {
+  all_csvs <- unique(as.character(all_csvs %||% character(0)))
+}
 
 # Map folder → SessionType
 infer_session_from_path <- function(fp) {
@@ -5532,8 +5563,10 @@ draw_heat <- function(grid, bins = HEAT_BINS, pal_fun = heat_pal_red,
 }
 
 
-pitch_data <- purrr::map_dfr(all_csvs, read_one)
-log_startup_timing(sprintf("Read %d CSV files into pitch_data (%d rows)", length(all_csvs), nrow(pitch_data)))
+if (!pitch_data_loaded_from_backend) {
+  pitch_data <- purrr::map_dfr(all_csvs, read_one)
+  log_startup_timing(sprintf("Read %d CSV files into pitch_data (%d rows)", length(all_csvs), nrow(pitch_data)))
+}
 
 # Ensure required columns exist since downstream code expects them
 # ------ add to need_cols ------
