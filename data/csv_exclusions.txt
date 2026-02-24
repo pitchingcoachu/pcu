@@ -3232,3 +3232,243 @@ practice_2026_02_12_Hitting_2026-02-12T223331_verified.csv
 practice_2026_02_12_Pitching_2026-02-12T202616_verified.csv
 # Auto-pruned non-team data
 practice_2026_02_19_Pitching_2026-02-19T203533_verified.csv
+# Auto-pruned non-team data
+practice_2024_01_02_Pitching_2024-01-02T173502_verified.csv
+# Auto-pruned non-team data
+practice_2024_01_02_Pitching_2024-01-02T181356_verified.csv
+# Auto-pruned non-team data
+practice_2024_01_19_Pitching_2024-01-19T211855_verified.csv
+# Auto-pruned non-team data
+practice_2024_01_25_Pitching_2024-01-25T174924_verified.csv
+# Auto-pruned non-team data
+practice_2024_01_26_Pitching_2024-01-26T180334_verified.csv
+# Auto-pruned non-team data
+practice_2024_01_27_Pitching_2024-01-27T195908_verified.csv
+# Auto-pruned non-team data
+practice_2024_02_03_Pitching_2024-02-03T221839_verified.csv
+# Auto-pruned non-team data
+practice_2024_02_06_Pitching_2024-02-06T174602_verified.csv
+# Auto-pruned non-team data
+practice_2024_02_10_Pitching_2024-02-10T205545_verified.csv
+# Auto-pruned non-team data
+practice_2024_02_13_Pitching_2024-02-13T171359_verified.csv
+# Auto-pruned non-team data
+practice_2024_02_13_Pitching_2024-02-13T181310_verified.csv
+# Auto-pruned non-team data
+practice_2024_02_14_Pitching_2024-02-14T171734_verified.csv
+# Auto-pruned non-team data
+practice_2024_02_16_Pitching_2024-02-16T170318_verified.csv
+# Auto-pruned non-team data
+practice_2024_02_20_Pitching_2024-02-20T164645_verified.csv
+# Auto-pruned non-team data
+practice_2024_02_21_Pitching_2024-02-21T201316_verified.csv
+# Auto-pruned non-team data
+practice_2024_03_02_Pitching_2024-03-02T163656_verified.csv
+# Auto-pruned non-team data
+practice_2024_03_06_Pitching_2024-03-06T193953_verified.csv
+# Auto-pruned non-team data
+practice_2024_03_07_Pitching_2024-03-07T172217_verified.csv
+# Auto-pruned non-team data
+practice_2024_03_07_Pitching_2024-03-07T182354_verified.csv
+# Auto-pruned non-team data
+practice_2024_03_07_Pitching_2024-03-07T182625_verified.csv
+# Auto-pruned non-team data
+practice_2024_03_14_Pitching_2024-03-14T160856_verified.csv
+# Auto-pruned non-team data
+practice_2024_03_16_Pitching_2024-03-16T175442_verified.csv
+# Auto-pruned non-team data
+practice_2024_03_21_Pitching_2024-03-21T162128_verified.csv
+# Auto-pruned non-team data
+practice_2024_03_21_Pitching_2024-03-21T182723_verified.csv
+# Auto-pruned non-team data
+practice_2024_03_22_Pitching_2024-03-22T160333_verified.csv
+# Auto-pruned non-team data
+practice_2024_03_23_Pitching_2024-03-23T212045_verified.csv
+# Auto-pruned non-team data
+practice_2024_03_28_Pitching_2024-03-28T181107_verified.csv
+# Auto-pruned non-team data
+practice_2024_04_03_Pitching_2024-04-03T174432_verified.csv
+# Auto-pruned non-team data
+practice_2024_04_05_Pitching_2024-04-05T165550_verified.csv
+# Auto-pruned non-team data
+practice_2024_04_12_Pitching_2024-04-12T173322_verified.csv
+# Auto-pruned non-team data
+practice_2024_04_20_Pitching_2024-04-20T193740_verified.csv
+# Auto-pruned non-team data
+practice_2024_04_22_Pitching_2024-04-22T175653_verified.csv
+# Auto-pruned non-team data
+practice_2024_04_27_Pitching_2024-04-27T172757_verified.csv
+# Auto-pruned non-team data
+practice_2024_04_29_Pitching_2024-04-29T172651_verified.csv
+# Auto-pruned non-team data
+practice_2024_05_02_Pitching_2024-05-02T173425_verified.csv
+# Auto-pruned non-team data
+practice_2024_05_16_Pitching_2024-05-16T161939_verified.csv
+# Auto-pruned non-team data
+practice_2024_05_28_Pitching_2024-05-28T170230_verified.csv
+# Auto-pruned non-team data
+practice_2024_06_04_Pitching_2024-06-04T165040_verified.csv
+# Auto-pruned non-team data
+practice_2024_06_17_Pitching_2024-06-17T183355_verified.csv
+# Auto-pruned non-team data
+practice_2024_06_20_Pitching_2024-06-20T182936_verified.csv
+# Auto-pruned non-team data
+practice_2024_06_26_Pitching_2024-06-26T183241_verified.csv
+# Auto-pruned non-team data
+practice_2024_07_01_Pitching_2024-07-01T170330_verified.csv
+# Auto-pruned non-team data
+practice_2024_07_08_Pitching_2024-07-08T180831_verified.csv
+# Auto-pruned non-team data
+practice_2024_07_12_Pitching_2024-07-12T160608_verified.csv
+# Auto-pruned non-team data
+practice_2024_07_22_Pitching_2024-07-22T193620_verified.csv
+# Auto-pruned non-team data
+practice_2024_07_29_Pitching_2024-07-29T193613_verified.csv
+# Auto-pruned non-team data
+practice_2024_08_09_Pitching_2024-08-09T155936_verified.csv
+# Auto-pruned non-team data
+practice_2024_08_09_Pitching_2024-08-09T215058_verified.csv
+# Auto-pruned non-team data
+practice_2024_08_10_Pitching_2024-08-10T140958_verified.csv
+# Auto-pruned non-team data
+practice_2024_08_11_Pitching_2024-08-11T161718_verified.csv
+# Auto-pruned non-team data
+practice_2024_08_14_Pitching_2024-08-14T191913_verified.csv
+# Auto-pruned non-team data
+practice_2024_08_17_Pitching_2024-08-17T162951_verified.csv
+# Auto-pruned non-team data
+practice_2024_08_24_Pitching_2024-08-24T155801_verified.csv
+# Auto-pruned non-team data
+practice_2024_08_26_Pitching_2024-08-26T193736_verified.csv
+# Auto-pruned non-team data
+practice_2024_09_18_Pitching_2024-09-18T185522_verified.csv
+# Auto-pruned non-team data
+practice_2024_10_25_Pitching_2024-10-25T175833_verified.csv
+# Auto-pruned non-team data
+practice_2024_11_08_Pitching_2024-11-08T210525_verified.csv
+# Auto-pruned non-team data
+practice_2024_11_16_Pitching_2024-11-16T162941_verified.csv
+# Auto-pruned non-team data
+practice_2024_11_19_Pitching_2024-11-19T215202_verified.csv
+# Auto-pruned non-team data
+practice_2024_11_27_Pitching_2024-11-27T183616_verified.csv
+# Auto-pruned non-team data
+practice_2024_11_29_Pitching_2024-11-29T173901_verified.csv
+# Auto-pruned non-team data
+practice_2024_12_09_Pitching_2024-12-09T183839_verified.csv
+# Auto-pruned non-team data
+practice_2024_12_12_Pitching_2024-12-12T181426_verified.csv
+# Auto-pruned non-team data
+practice_2024_12_19_Pitching_2024-12-19T181835_verified.csv
+# Auto-pruned non-team data
+practice_2024_12_19_Pitching_2024-12-19T182132_verified.csv
+# Auto-pruned non-team data
+practice_2024_12_20_Pitching_2024-12-20T143415_verified.csv
+# Auto-pruned non-team data
+practice_2024_12_22_Pitching_2024-12-22T155030_verified.csv
+# Auto-pruned non-team data
+practice_2025_01_31_Pitching_2025-01-31T150451_verified.csv
+# Auto-pruned non-team data
+practice_2025_02_03_Pitching_2025-02-03T191117_verified.csv
+# Auto-pruned non-team data
+practice_2025_02_25_Pitching_2025-02-25T184608_verified.csv
+# Auto-pruned non-team data
+practice_2025_02_28_Pitching_2025-02-28T155519_verified.csv
+# Auto-pruned non-team data
+practice_2025_03_10_Pitching_2025-03-10T204033_verified.csv
+# Auto-pruned non-team data
+practice_2025_03_13_Pitching_2025-03-13T155528_verified.csv
+# Auto-pruned non-team data
+practice_2025_03_14_Pitching_2025-03-14T211250_verified.csv
+# Auto-pruned non-team data
+practice_2025_05_26_Pitching_2025-05-26T193725_verified.csv
+# Auto-pruned non-team data
+practice_2025_05_29_Pitching_2025-05-29T222910_verified.csv
+# Auto-pruned non-team data
+practice_2025_05_30_Pitching_2025-05-30T164425_verified.csv
+# Auto-pruned non-team data
+practice_2025_06_05_Pitching_2025-06-05T223911_verified.csv
+# Auto-pruned non-team data
+practice_2025_06_06_Pitching_2025-06-06T145318_verified.csv
+# Auto-pruned non-team data
+practice_2025_06_08_Pitching_2025-06-08T144850_verified.csv
+# Auto-pruned non-team data
+practice_2025_06_11_Pitching_2025-06-11T205315_verified.csv
+# Auto-pruned non-team data
+practice_2025_08_22_Pitching_2025-08-22T171821_verified.csv
+# Auto-pruned non-team data
+practice_2025_08_22_Pitching_2025-08-22T184821_verified.csv
+# Auto-pruned non-team data
+practice_2025_09_05_Pitching_2025-09-05T195033_verified.csv
+# Auto-pruned non-team data
+practice_2025_09_08_Pitching_2025-09-08T201951_verified.csv
+# Auto-pruned non-team data
+practice_2025_09_10_Pitching_2025-09-10T192710_verified.csv
+# Auto-pruned non-team data
+practice_2025_09_12_Pitching_2025-09-12T191614_verified.csv
+# Auto-pruned non-team data
+practice_2025_09_17_Pitching_2025-09-17T201523_verified.csv
+# Auto-pruned non-team data
+practice_2025_09_18_Pitching_2025-09-18T165141_verified.csv
+# Auto-pruned non-team data
+practice_2025_09_30_Pitching_2025-09-30T204338_verified.csv
+# Auto-pruned non-team data
+practice_2025_10_01_Pitching_2025-10-01T203541_verified.csv
+# Auto-pruned non-team data
+practice_2025_10_07_Pitching_2025-10-07T184443_verified.csv
+# Auto-pruned non-team data
+practice_2025_10_11_Pitching_2025-10-11T145650_verified.csv
+# Auto-pruned non-team data
+practice_2025_10_14_Pitching_2025-10-14T190857_verified.csv
+# Auto-pruned non-team data
+practice_2025_10_22_Pitching_2025-10-22T185534_verified.csv
+# Auto-pruned non-team data
+practice_2025_11_07_Hitting_2025-11-07T215510_verified.csv
+# Auto-pruned non-team data
+practice_2025_11_10_Pitching_2025-11-10T200259_verified.csv
+# Auto-pruned non-team data
+practice_2025_11_28_Pitching_2025-11-28T153314_verified.csv
+# Auto-pruned non-team data
+practice_2025_12_18_Hitting_2025-12-18T233358_verified.csv
+# Auto-pruned non-team data
+practice_2025_12_22_Pitching_2025-12-22T233144_verified.csv
+# Auto-pruned non-team data
+practice_2026_01_14_Pitching_2026-01-14T203525_verified.csv
+# Auto-pruned non-team data
+practice_2026_01_15_Pitching_2026-01-15T210918_verified.csv
+# Auto-pruned non-team data
+practice_2026_01_17_Pitching_2026-01-17T194737_verified.csv
+# Auto-pruned non-team data
+practice_2026_01_18_Pitching_2026-01-18T194716_verified.csv
+# Auto-pruned non-team data
+practice_2026_01_20_Pitching_2026-01-20T191620_verified.csv
+# Auto-pruned non-team data
+practice_2026_01_21_Pitching_2026-01-21T211714_verified.csv
+# Auto-pruned non-team data
+practice_2026_01_23_Pitching_2026-01-23T190458_verified.csv
+# Auto-pruned non-team data
+practice_2026_01_24_Pitching_2026-01-24T200451_verified.csv
+# Auto-pruned non-team data
+practice_2026_01_24_Pitching_2026-01-24T202223_verified.csv
+# Auto-pruned non-team data
+practice_2026_01_28_Pitching_2026-01-28T200007_verified.csv
+# Auto-pruned non-team data
+practice_2026_02_01_Pitching_2026-02-01T185433_verified.csv
+# Auto-pruned non-team data
+practice_2026_02_07_Pitching_2026-02-07T185848_verified.csv
+# Auto-pruned non-team data
+practice_2026_02_08_Pitching_2026-02-08T175023_verified.csv
+# Auto-pruned non-team data
+practice_2026_02_09_Hitting_2026-02-09T232601_verified.csv
+# Auto-pruned non-team data
+practice_2026_02_09_Pitching_2026-02-09T205148_verified.csv
+# Auto-pruned non-team data
+practice_2026_02_11_Hitting_2026-02-11T231606_verified.csv
+# Auto-pruned non-team data
+practice_2026_02_11_Pitching_2026-02-11T200640_verified.csv
+# Auto-pruned non-team data
+practice_2026_02_12_Hitting_2026-02-12T223331_verified.csv
+# Auto-pruned non-team data
+practice_2026_02_12_Pitching_2026-02-12T202616_verified.csv
+# Auto-pruned non-team data
+practice_2026_02_19_Pitching_2026-02-19T203533_verified.csv
