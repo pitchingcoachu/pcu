@@ -29,6 +29,11 @@ LOCAL_PRACTICE_DIR  <- file.path(LOCAL_DATA_DIR, "practice")
 LOCAL_V3_DIR        <- file.path(LOCAL_DATA_DIR, "v3")
 SYNC_START_YEAR <- suppressWarnings(as.integer(Sys.getenv("TM_SYNC_START_YEAR", "2024")))
 if (is.na(SYNC_START_YEAR) || SYNC_START_YEAR < 2000) SYNC_START_YEAR <- 2024
+LAST_SYNC_FILE <- file.path(LOCAL_DATA_DIR, "last_sync.txt")
+TM_SYNC_LOOKBACK_DAYS <- suppressWarnings(as.integer(Sys.getenv("TM_SYNC_LOOKBACK_DAYS", "45")))
+if (is.na(TM_SYNC_LOOKBACK_DAYS) || TM_SYNC_LOOKBACK_DAYS < 1L) TM_SYNC_LOOKBACK_DAYS <- 45L
+FTP_THROTTLE_SEC <- suppressWarnings(as.numeric(Sys.getenv("TM_FTP_THROTTLE_SEC", "0")))
+if (is.na(FTP_THROTTLE_SEC) || FTP_THROTTLE_SEC < 0) FTP_THROTTLE_SEC <- 0
 
 # Ensure data directories exist
 dir.create(LOCAL_DATA_DIR, recursive = TRUE, showWarnings = FALSE)
@@ -69,38 +74,45 @@ download_csv <- function(remote_file, local_file) {
   url <- paste0("ftp://", FTP_HOST, remote_file)
   
   tryCatch({
-    # Download file to temporary location using curl with proper credentials
     temp_file <- tempfile(fileext = ".csv")
     handle <- curl::new_handle(userpwd = FTP_USERPWD)
     curl::handle_setopt(handle, ftp_use_epsv = FALSE)
-    bin <- curl::curl_fetch_memory(url, handle = handle)$content
-    writeBin(bin, temp_file)
-    
-    # Read data to check if valid
-    data <- read_csv(temp_file, show_col_types = FALSE)
-    
-    # Only save if we have data
-    if (nrow(data) > 0) {
-      write_csv(data, local_file)
-      cat("Downloaded", nrow(data), "rows to", local_file, "\n")
-      unlink(temp_file)
-      return(TRUE)
-    } else {
+    curl::curl_download(url, destfile = temp_file, mode = "wb", handle = handle)
+
+    file_size <- suppressWarnings(file.info(temp_file)$size)
+    if (!is.finite(file_size) || file_size <= 0) {
       cat("No data found in", remote_file, "\n")
       unlink(temp_file)
       return(FALSE)
     }
-    
+
+    dir.create(dirname(local_file), recursive = TRUE, showWarnings = FALSE)
+    if (!file.rename(temp_file, local_file)) {
+      ok <- file.copy(temp_file, local_file, overwrite = TRUE)
+      unlink(temp_file)
+      if (!isTRUE(ok)) stop("Failed to move downloaded file into place")
+    }
+    cat("Downloaded", basename(local_file), "-", format(file_size, big.mark = ","), "bytes\n")
+    return(TRUE)
   }, error = function(e) {
     cat("Error processing", remote_file, ":", e$message, "\n")
     return(FALSE)
   })
 }
 
+recent_sync_years <- function() {
+  if (!file.exists(LAST_SYNC_FILE)) {
+    return(as.character(SYNC_START_YEAR:year(Sys.Date())))
+  }
+  start_date <- Sys.Date() - TM_SYNC_LOOKBACK_DAYS
+  start_year <- max(SYNC_START_YEAR, year(start_date))
+  as.character(start_year:year(Sys.Date()))
+}
+
 # Function to sync practice data (2025 folder with MM/DD structure)
 sync_practice_data <- function() {
   cat("Syncing practice data...\n")
-  years <- as.character(SYNC_START_YEAR:year(Sys.Date()))
+  years <- recent_sync_years()
   downloaded_count <- 0
   
   for (yr in years) {
@@ -133,7 +145,7 @@ sync_practice_data <- function() {
             downloaded_count <- downloaded_count + 1
           }
           
-          Sys.sleep(0.1)
+          if (FTP_THROTTLE_SEC > 0) Sys.sleep(FTP_THROTTLE_SEC)
         }
       }
     }
@@ -163,7 +175,7 @@ is_date_in_range <- function(file_path) {
 # Function to sync v3 data with date filtering
 sync_v3_data <- function() {
   cat("Syncing v3 data with date filtering...\n")
-  years <- as.character(SYNC_START_YEAR:year(Sys.Date()))
+  years <- recent_sync_years()
   downloaded_count <- 0
   seen_v3_files <- character(0)
   
@@ -217,7 +229,7 @@ sync_v3_data <- function() {
               downloaded_count <- downloaded_count + 1
             }
             
-            Sys.sleep(0.1)
+            if (FTP_THROTTLE_SEC > 0) Sys.sleep(FTP_THROTTLE_SEC)
           }
         } else {
           csv_files <- files_in_day[grepl("\\.csv$", files_in_day, ignore.case = TRUE)]
@@ -241,7 +253,7 @@ sync_v3_data <- function() {
               downloaded_count <- downloaded_count + 1
             }
             
-            Sys.sleep(0.1)
+            if (FTP_THROTTLE_SEC > 0) Sys.sleep(FTP_THROTTLE_SEC)
           }
         }
       }
@@ -467,8 +479,7 @@ main_sync <- function() {
   
   # Only clean old files if this is the first run (no last_sync.txt exists)
   # This prevents re-downloading everything on subsequent runs
-  last_sync_file <- file.path(LOCAL_DATA_DIR, "last_sync.txt")
-  if (!file.exists(last_sync_file)) {
+  if (!file.exists(LAST_SYNC_FILE)) {
     cat("First run detected - cleaning old data files\n")
     old_files <- list.files(LOCAL_DATA_DIR, pattern = "\\.(csv|txt)$", full.names = TRUE, recursive = TRUE)
     if (length(old_files) > 0) {
@@ -488,9 +499,27 @@ main_sync <- function() {
   
   cat("Data sync completed in", round(duration, 2), "minutes\n")
   
-  # Deduplicate downloaded files if any data was updated
+  # Global local-file dedupe is expensive; default it off for Neon backend.
   if (practice_updated || v3_updated) {
-    deduplicate_files()
+    local_dedupe_default <- TRUE
+    if (exists("pitch_data_backend_config", mode = "function")) {
+      backend_type <- tryCatch(pitch_data_backend_config()$type, error = function(e) "csv")
+      if (identical(backend_type, "postgres")) local_dedupe_default <- FALSE
+    }
+    local_dedupe_enabled <- tryCatch(
+      if (exists("pitch_data_parse_bool", mode = "function")) {
+        pitch_data_parse_bool(Sys.getenv("PITCH_DATA_LOCAL_DEDUP", if (local_dedupe_default) "1" else "0"), default = local_dedupe_default)
+      } else {
+        tolower(trimws(Sys.getenv("PITCH_DATA_LOCAL_DEDUP", if (local_dedupe_default) "1" else "0"))) %in% c("1", "true", "yes", "y")
+      },
+      error = function(e) local_dedupe_default
+    )
+
+    if (isTRUE(local_dedupe_enabled)) {
+      deduplicate_files()
+    } else {
+      cat("Skipping local CSV dedupe (Neon handles deduplication during sync)\n")
+    }
   }
 
   cleanup_count <- cleanup_irrelevant_team_csvs(team_filters)
@@ -499,7 +528,7 @@ main_sync <- function() {
   }
   
   # Update last sync timestamp and modification notification
-  writeLines(as.character(Sys.time()), file.path(LOCAL_DATA_DIR, "last_sync.txt"))
+  writeLines(as.character(Sys.time()), LAST_SYNC_FILE)
   
   # Create a flag file to indicate new data is available
   if (practice_updated || v3_updated) {

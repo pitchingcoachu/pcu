@@ -573,11 +573,11 @@ sync_csv_file_to_neon <- function(con, csv_path, school_code = "") {
   mtbl <- DBI::Id(schema = schema, table = "pitch_data_files")
   etbl <- DBI::Id(schema = schema, table = Sys.getenv("PITCH_DATA_DB_TABLE", "pitch_events"))
 
-  checksum <- digest::digest(file = csv_path, algo = "xxhash64")
   source_file <- normalizePath(csv_path, winslash = "/", mustWork = FALSE)
+  local_mtime <- suppressWarnings(as.numeric(file.info(csv_path)$mtime))
 
   existing_sql <- sprintf(
-    "SELECT file_id, file_checksum, row_count
+    "SELECT file_id, file_checksum, row_count, EXTRACT(EPOCH FROM file_mtime) AS file_mtime_epoch
      FROM %s
      WHERE school_code = %s AND source_file = %s",
     as.character(DBI::dbQuoteIdentifier(con, mtbl)),
@@ -585,6 +585,28 @@ sync_csv_file_to_neon <- function(con, csv_path, school_code = "") {
     as.character(DBI::dbQuoteLiteral(con, source_file))
   )
   existing <- tryCatch(DBI::dbGetQuery(con, existing_sql), error = function(e) data.frame())
+  if (nrow(existing) == 1L) {
+    file_id_existing <- suppressWarnings(as.integer(existing$file_id[[1]]))
+    expected_rows <- suppressWarnings(as.integer(existing$row_count[[1]]))
+    remote_mtime <- suppressWarnings(as.numeric(existing$file_mtime_epoch[[1]]))
+    same_mtime <- is.finite(local_mtime) && is.finite(remote_mtime) && abs(local_mtime - remote_mtime) < 1
+    if (same_mtime && is.finite(file_id_existing) && file_id_existing > 0 && is.finite(expected_rows) && expected_rows >= 0) {
+      cnt_sql <- sprintf(
+        "SELECT COUNT(*) AS n FROM %s WHERE school_code = %s AND file_id = %d",
+        as.character(DBI::dbQuoteIdentifier(con, etbl)),
+        as.character(DBI::dbQuoteLiteral(con, school_code)),
+        file_id_existing
+      )
+      existing_rows <- tryCatch(DBI::dbGetQuery(con, cnt_sql)$n[[1]], error = function(e) NA_integer_)
+      if (is.finite(existing_rows) && as.integer(existing_rows) == expected_rows) {
+        out <- 0L
+        attr(out, "skipped") <- TRUE
+        return(out)
+      }
+    }
+  }
+
+  checksum <- digest::digest(file = csv_path, algo = "xxhash64")
   if (nrow(existing) == 1L) {
     same_checksum <- !is.na(existing$file_checksum[[1]]) &&
       identical(as.character(existing$file_checksum[[1]]), as.character(checksum))
@@ -687,7 +709,7 @@ sync_csv_file_to_neon <- function(con, csv_path, school_code = "") {
     as.character(DBI::dbQuoteLiteral(con, school_code)),
     as.character(DBI::dbQuoteLiteral(con, source_file)),
     as.character(DBI::dbQuoteLiteral(con, checksum)),
-    as.numeric(file.info(csv_path)$mtime),
+    local_mtime,
     nrow(df)
   )
   DBI::dbExecute(con, up_sql)
