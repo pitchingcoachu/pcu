@@ -1469,40 +1469,9 @@ deduplicate_pitch_rows <- function(df, fast = FALSE) {
   # Fast-path: skip expensive grouped dedupe when keys are already unique.
   if (!anyDuplicated(key_chr[key_valid])) return(df)
 
-  if (isTRUE(fast)) {
-    keep <- !key_valid | !duplicated(key_chr)
-    return(df[keep, , drop = FALSE])
-  }
-
-  # Keep the most complete row per PitchKey in case duplicate files differ slightly.
-  present_score <- function(x) {
-    if (is.numeric(x)) return(as.integer(is.finite(x)))
-    as.integer(!is.na(x) & nzchar(trimws(as.character(x))))
-  }
-
-  score_cols <- c(
-    "PlayID", "PitchCall", "PlayResult", "TaggedPitchType",
-    "RelSpeed", "InducedVertBreak", "HorzBreak", "PlateLocSide", "PlateLocHeight",
-    "VideoClip", "VideoClip2", "VideoClip3"
-  )
-  score_cols <- intersect(score_cols, names(df))
-  if (!length(score_cols)) score_cols <- names(df)
-
-  df$.row_id <- seq_len(nrow(df))
-  df$.dedupe_score <- 0L
-  for (col in score_cols) {
-    df$.dedupe_score <- df$.dedupe_score + present_score(df[[col]])
-  }
-
-  out <- df %>%
-    dplyr::group_by(PitchKey) %>%
-    dplyr::arrange(dplyr::desc(.dedupe_score), .row_id, .by_group = TRUE) %>%
-    dplyr::slice_head(n = 1) %>%
-    dplyr::ungroup() %>%
-    dplyr::arrange(.row_id) %>%
-    dplyr::select(-.row_id, -.dedupe_score)
-
-  out
+  # Keep first occurrence per PitchKey; vastly faster than grouped scoring for large tables.
+  keep <- !key_valid | !duplicated(key_chr)
+  df[keep, , drop = FALSE]
 }
 
 mod_datetime_to_numeric <- function(x) {

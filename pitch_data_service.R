@@ -578,7 +578,6 @@ load_pitch_data_from_postgres <- function(school_code = "", startup_logger = NUL
     return(NULL)
   }
 
-  ranges <- pitch_data_monthly_ranges(con, school_code)
   workers <- suppressWarnings(as.integer(Sys.getenv("PITCH_DATA_PARALLEL_WORKERS", "2")))
   if (is.na(workers) || workers < 1L) workers <- 1L
   chunk_size <- suppressWarnings(as.integer(Sys.getenv("PITCH_DATA_CHUNK_SIZE", "100000")))
@@ -586,25 +585,8 @@ load_pitch_data_from_postgres <- function(school_code = "", startup_logger = NUL
 
   pitch_data_logger(startup_logger, sprintf("Loading pitch data from Neon (workers=%d chunk=%d)", workers, chunk_size))
 
-  if (!length(ranges)) {
-    df <- pitch_data_fetch_range(cfg = cfg, school_code = school_code, chunk_size = chunk_size)
-  } else {
-    fetch_one <- function(rg) {
-      pitch_data_fetch_range(
-        cfg = cfg,
-        school_code = school_code,
-        start_date = rg$start,
-        end_date = rg$end,
-        chunk_size = chunk_size
-      )
-    }
-
-    # RPostgres connections are not fork-safe on some systems; avoid mclapply here.
-    # Keep deterministic, stable startup over risky forked DB reads.
-    parts <- lapply(ranges, fetch_one)
-    parts <- Filter(function(x) is.data.frame(x) && nrow(x) > 0, parts)
-    df <- if (length(parts)) dplyr::bind_rows(parts) else data.frame()
-  }
+  # Use one sequential keyset scan; monthly partition fan-out adds significant connect/query overhead.
+  df <- pitch_data_fetch_range(cfg = cfg, school_code = school_code, chunk_size = chunk_size)
 
   if (nrow(df)) {
     ord <- c()
