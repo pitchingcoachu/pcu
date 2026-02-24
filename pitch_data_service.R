@@ -389,7 +389,7 @@ pitch_data_fetch_range <- function(cfg, school_code, start_date = NULL, end_date
       key_state = key_state
     )
 
-    chunk <- tryCatch(DBI::dbGetQuery(con, q$sql), error = function(e) NULL)
+    chunk <- tryCatch(DBI::dbGetQuery(con, q$sql, immediate = TRUE), error = function(e) NULL)
     if (is.null(chunk) || !nrow(chunk)) break
 
     out[[length(out) + 1L]] <- chunk
@@ -425,7 +425,7 @@ pitch_data_monthly_ranges <- function(con, school_code = "") {
     as.character(DBI::dbQuoteIdentifier(con, tbl)),
     where
   )
-  mm <- tryCatch(DBI::dbGetQuery(con, sql), error = function(e) NULL)
+  mm <- tryCatch(DBI::dbGetQuery(con, sql, immediate = TRUE), error = function(e) NULL)
   if (is.null(mm) || !nrow(mm) || is.na(mm$min_date[[1]]) || is.na(mm$max_date[[1]])) return(list())
 
   start <- as.Date(mm$min_date[[1]])
@@ -532,13 +532,29 @@ load_pitch_data_from_postgres <- function(school_code = "", startup_logger = NUL
 load_pitch_data_with_backend <- function(local_data_dir = file.path(getwd(), "data"), school_code = "", startup_logger = NULL) {
   cfg <- pitch_data_backend_config()
   if (!identical(cfg$type, "postgres")) return(NULL)
-  tryCatch(
-    load_pitch_data_from_postgres(school_code = school_code, startup_logger = startup_logger),
-    error = function(e) {
-      pitch_data_logger(startup_logger, paste("Neon load failed, fallback to CSV:", e$message))
-      NULL
+  max_attempts <- suppressWarnings(as.integer(Sys.getenv("PITCH_DATA_DB_RETRIES", "3")))
+  if (is.na(max_attempts) || max_attempts < 1L) max_attempts <- 3L
+
+  last_err <- NULL
+  for (attempt in seq_len(max_attempts)) {
+    res <- tryCatch(
+      load_pitch_data_from_postgres(school_code = school_code, startup_logger = startup_logger),
+      error = function(e) {
+        last_err <<- e
+        NULL
+      }
+    )
+    if (!is.null(res)) return(res)
+    if (attempt < max_attempts) {
+      pitch_data_logger(startup_logger, sprintf("Neon load attempt %d/%d failed; retrying", attempt, max_attempts))
+      Sys.sleep(min(1, 0.25 * attempt))
     }
-  )
+  }
+
+  if (!is.null(last_err)) {
+    pitch_data_logger(startup_logger, paste("Neon load failed, fallback to CSV:", last_err$message))
+  }
+  NULL
 }
 
 ensure_pitch_data_schema <- function(con = NULL, schema_sql_path = file.path("db", "pitch_data_schema.sql")) {
@@ -584,7 +600,7 @@ sync_csv_file_to_neon <- function(con, csv_path, school_code = "") {
     as.character(DBI::dbQuoteLiteral(con, school_code)),
     as.character(DBI::dbQuoteLiteral(con, source_file))
   )
-  existing <- tryCatch(DBI::dbGetQuery(con, existing_sql), error = function(e) data.frame())
+  existing <- tryCatch(DBI::dbGetQuery(con, existing_sql, immediate = TRUE), error = function(e) data.frame())
   if (nrow(existing) == 1L) {
     file_id_existing <- suppressWarnings(as.integer(existing$file_id[[1]]))
     expected_rows <- suppressWarnings(as.integer(existing$row_count[[1]]))
@@ -597,7 +613,7 @@ sync_csv_file_to_neon <- function(con, csv_path, school_code = "") {
         as.character(DBI::dbQuoteLiteral(con, school_code)),
         file_id_existing
       )
-      existing_rows <- tryCatch(DBI::dbGetQuery(con, cnt_sql)$n[[1]], error = function(e) NA_integer_)
+      existing_rows <- tryCatch(DBI::dbGetQuery(con, cnt_sql, immediate = TRUE)$n[[1]], error = function(e) NA_integer_)
       if (is.finite(existing_rows) && as.integer(existing_rows) == expected_rows) {
         out <- 0L
         attr(out, "skipped") <- TRUE
@@ -620,7 +636,7 @@ sync_csv_file_to_neon <- function(con, csv_path, school_code = "") {
           as.character(DBI::dbQuoteLiteral(con, school_code)),
           file_id_existing
         )
-        existing_rows <- tryCatch(DBI::dbGetQuery(con, cnt_sql)$n[[1]], error = function(e) NA_integer_)
+        existing_rows <- tryCatch(DBI::dbGetQuery(con, cnt_sql, immediate = TRUE)$n[[1]], error = function(e) NA_integer_)
         if (is.finite(existing_rows) && as.integer(existing_rows) == expected_rows) {
           out <- 0L
           attr(out, "skipped") <- TRUE
@@ -720,7 +736,7 @@ sync_csv_file_to_neon <- function(con, csv_path, school_code = "") {
     as.character(DBI::dbQuoteLiteral(con, school_code)),
     as.character(DBI::dbQuoteLiteral(con, source_file))
   )
-  file_id <- DBI::dbGetQuery(con, file_id_sql)$file_id[[1]]
+  file_id <- DBI::dbGetQuery(con, file_id_sql, immediate = TRUE)$file_id[[1]]
 
   # Replace current rows for this file then bulk-insert refreshed rows.
   del_sql <- sprintf(
