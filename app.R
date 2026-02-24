@@ -1459,7 +1459,7 @@ ensure_pitch_keys <- function(df) {
   df
 }
 
-deduplicate_pitch_rows <- function(df) {
+deduplicate_pitch_rows <- function(df, fast = FALSE) {
   if (!nrow(df)) return(df)
   df <- ensure_pitch_keys(df)
   if (!"PitchKey" %in% names(df)) return(df)
@@ -1468,6 +1468,11 @@ deduplicate_pitch_rows <- function(df) {
   key_valid <- !is.na(key_chr) & nzchar(key_chr)
   # Fast-path: skip expensive grouped dedupe when keys are already unique.
   if (!anyDuplicated(key_chr[key_valid])) return(df)
+
+  if (isTRUE(fast)) {
+    keep <- !key_valid | !duplicated(key_chr)
+    return(df[keep, , drop = FALSE])
+  }
 
   # Keep the most complete row per PitchKey in case duplicate files differ slightly.
   present_score <- function(x) {
@@ -5784,7 +5789,7 @@ log_startup_timing("Completed video map merge/attachment")
 pitch_data <- ensure_pitch_keys(pitch_data)
 log_startup_timing("Computed/validated PitchKey values")
 rows_before_dedupe <- nrow(pitch_data)
-pitch_data <- deduplicate_pitch_rows(pitch_data)
+pitch_data <- deduplicate_pitch_rows(pitch_data, fast = isTRUE(pitch_data_loaded_from_backend))
 rows_after_dedupe <- nrow(pitch_data)
 rows_removed_dedupe <- rows_before_dedupe - rows_after_dedupe
 log_startup_timing(sprintf("Deduplicated pitch rows (removed=%d)", rows_removed_dedupe))
