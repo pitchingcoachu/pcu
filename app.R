@@ -5713,6 +5713,13 @@ if (file.exists(manual_map_path)) {
 }
 
 if (length(video_maps) > 0) {
+  video_maps <- lapply(video_maps, function(df) {
+    if (!is.data.frame(df)) return(df)
+    if ("uploaded_at" %in% names(df)) {
+      df$uploaded_at <- as.character(df$uploaded_at)
+    }
+    df
+  })
   vm_raw <- dplyr::bind_rows(video_maps) %>% dplyr::distinct()
   message("🎬 Combined total: ", nrow(vm_raw), " videos available")
   if (nrow(vm_raw)) {
