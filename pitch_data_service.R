@@ -569,6 +569,45 @@ sync_csv_file_to_neon <- function(con, csv_path, school_code = "") {
   school_code <- toupper(trimws(as.character(school_code)))
   if (!nzchar(school_code)) school_code <- toupper(trimws(Sys.getenv("TEAM_CODE", "OSU")))
 
+  schema <- gsub("[^A-Za-z0-9_]", "_", Sys.getenv("PITCH_DATA_DB_SCHEMA", "public"))
+  mtbl <- DBI::Id(schema = schema, table = "pitch_data_files")
+  etbl <- DBI::Id(schema = schema, table = Sys.getenv("PITCH_DATA_DB_TABLE", "pitch_events"))
+
+  checksum <- digest::digest(file = csv_path, algo = "xxhash64")
+  source_file <- normalizePath(csv_path, winslash = "/", mustWork = FALSE)
+
+  existing_sql <- sprintf(
+    "SELECT file_id, file_checksum, row_count
+     FROM %s
+     WHERE school_code = %s AND source_file = %s",
+    as.character(DBI::dbQuoteIdentifier(con, mtbl)),
+    as.character(DBI::dbQuoteLiteral(con, school_code)),
+    as.character(DBI::dbQuoteLiteral(con, source_file))
+  )
+  existing <- tryCatch(DBI::dbGetQuery(con, existing_sql), error = function(e) data.frame())
+  if (nrow(existing) == 1L) {
+    same_checksum <- !is.na(existing$file_checksum[[1]]) &&
+      identical(as.character(existing$file_checksum[[1]]), as.character(checksum))
+    if (same_checksum) {
+      file_id_existing <- suppressWarnings(as.integer(existing$file_id[[1]]))
+      expected_rows <- suppressWarnings(as.integer(existing$row_count[[1]]))
+      if (is.finite(file_id_existing) && file_id_existing > 0 && is.finite(expected_rows) && expected_rows >= 0) {
+        cnt_sql <- sprintf(
+          "SELECT COUNT(*) AS n FROM %s WHERE school_code = %s AND file_id = %d",
+          as.character(DBI::dbQuoteIdentifier(con, etbl)),
+          as.character(DBI::dbQuoteLiteral(con, school_code)),
+          file_id_existing
+        )
+        existing_rows <- tryCatch(DBI::dbGetQuery(con, cnt_sql)$n[[1]], error = function(e) NA_integer_)
+        if (is.finite(existing_rows) && as.integer(existing_rows) == expected_rows) {
+          out <- 0L
+          attr(out, "skipped") <- TRUE
+          return(out)
+        }
+      }
+    }
+  }
+
   cols_needed <- pitch_data_default_columns()
   df <- suppressMessages(readr::read_csv(
     csv_path,
@@ -635,13 +674,6 @@ sync_csv_file_to_neon <- function(con, csv_path, school_code = "") {
     Sys.getenv("PITCH_DATA_DB_SCHEMA", "public"),
     as.character(DBI::dbQuoteLiteral(con, school_code))
   ))
-
-  schema <- gsub("[^A-Za-z0-9_]", "_", Sys.getenv("PITCH_DATA_DB_SCHEMA", "public"))
-  mtbl <- DBI::Id(schema = schema, table = "pitch_data_files")
-  etbl <- DBI::Id(schema = schema, table = Sys.getenv("PITCH_DATA_DB_TABLE", "pitch_events"))
-
-  checksum <- digest::digest(file = csv_path, algo = "xxhash64")
-  source_file <- normalizePath(csv_path, winslash = "/", mustWork = FALSE)
 
   up_sql <- sprintf(
     "INSERT INTO %s (school_code, source_file, file_checksum, file_mtime, row_count)
@@ -729,18 +761,30 @@ sync_csv_tree_to_neon <- function(data_dir = file.path("data"), school_code = ""
     tryCatch({
       DBI::dbBegin(c)
       n <- sync_csv_file_to_neon(c, p, school_code = school_code)
+      skipped <- isTRUE(attr(n, "skipped"))
       DBI::dbCommit(c)
-      list(path = p, rows = n, ok = TRUE, err = "")
+      list(path = p, rows = n, ok = TRUE, skipped = skipped, err = "")
     }, error = function(e) {
       tryCatch(DBI::dbRollback(c), error = function(...) NULL)
-      list(path = p, rows = 0L, ok = FALSE, err = e$message)
+      list(path = p, rows = 0L, ok = FALSE, skipped = FALSE, err = e$message)
     })
   }
 
   if (workers > 1L) {
     message("Using sequential file sync for DB safety (RPostgres fork parallel disabled).")
   }
-  results <- lapply(csvs, do_one)
+  results <- vector("list", length(csvs))
+  for (i in seq_along(csvs)) {
+    results[[i]] <- do_one(csvs[[i]])
+    if (i %% 25L == 0L || i == length(csvs)) {
+      ok_now <- vapply(results[seq_len(i)], function(x) is.list(x) && isTRUE(x$ok), logical(1))
+      rows_now <- sum(vapply(results[seq_len(i)][ok_now], function(x) as.integer(x$rows), integer(1)), na.rm = TRUE)
+      skipped_now <- sum(vapply(results[seq_len(i)][ok_now], function(x) isTRUE(x$skipped), logical(1)), na.rm = TRUE)
+      fail_now <- i - sum(ok_now)
+      message(sprintf("Pitch sync progress: %d/%d files | rows=%d | skipped=%d | failed=%d",
+                      i, length(csvs), rows_now, skipped_now, fail_now))
+    }
+  }
 
   ok <- vapply(results, function(x) isTRUE(x$ok), logical(1))
   failures <- results[!ok]
@@ -752,8 +796,10 @@ sync_csv_tree_to_neon <- function(data_dir = file.path("data"), school_code = ""
   }
 
   total_rows <- sum(vapply(results[ok], function(x) as.integer(x$rows), integer(1)), na.rm = TRUE)
-  message(sprintf("Neon sync complete: files=%d success=%d failed=%d rows=%d",
-                  length(csvs), sum(ok), sum(!ok), total_rows))
+  skipped_files <- sum(vapply(results[ok], function(x) isTRUE(x$skipped), logical(1)), na.rm = TRUE)
+  synced_files <- sum(ok) - skipped_files
+  message(sprintf("Neon sync complete: files=%d success=%d failed=%d synced=%d skipped=%d rows=%d",
+                  length(csvs), sum(ok), sum(!ok), synced_files, skipped_files, total_rows))
 
   invisible(total_rows)
 }
