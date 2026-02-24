@@ -57,6 +57,12 @@ jobs:
         MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}
         MYSQL_PORT=3306
         MYSQL_SSL_CA=
+        TEAM_CODE=PCU
+        PITCH_DATA_BACKEND=postgres
+        PITCH_DATA_DB_URL=${{ secrets.PITCH_DATA_DB_URL }}
+        PITCH_DATA_SYNC_AFTER_FTP=1
+        PITCH_DATA_SYNC_WORKERS=1
+        TM_SYNC_START_YEAR=2024
         # Persist shinymanager credentials between deploys
         CREDENTIALS_SQLITE_PATH=/home/shiny/credentials.sqlite
         EOF
@@ -86,7 +92,7 @@ jobs:
       run: |
         Rscript -e "rsconnect::setAccountInfo(name='${{ secrets.SHINYAPPS_ACCOUNT }}', token='${{ secrets.SHINYAPPS_TOKEN }}', secret='${{ secrets.SHINYAPPS_SECRET }}')"
         
-    - name: Sync GCU data
+    - name: Sync PCU data
       env:
         R_LIBS_USER: packrat/lib-R
       run: Rscript automated_data_sync.R
@@ -121,17 +127,6 @@ jobs:
         R_LIBS_USER: packrat/lib-R
       run: Rscript deploy_script.R
       
-    - name: Commit updated data
+    - name: Skip committing data files
       if: steps.check_data.outputs.data_updated == 'true'
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        git add data/
-        if git diff --staged --quiet; then
-          echo "No changes to commit"
-        else
-          git commit -m "Auto-update GCU data $(date)"
-          # Rebase safely even with untracked/unstaged files from earlier steps
-          git pull --rebase --autostash origin main
-          git push
-        fi
+      run: echo "Data files synced to Neon; skipping git commit of local CSVs."
