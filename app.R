@@ -5736,7 +5736,7 @@ if (length(video_maps) > 0) {
         { 
           vm_cols <- paste0(c("VideoClip","VideoClip2","VideoClip3"), ".vm")
           for (vm_col in vm_cols) {
-            if (!vm_col %in% names(.)) .[[vm_col]] <- NA_character_
+            if (!vm_col %in% names(.)) .[[vm_col]] <- rep(NA_character_, nrow(.))
           }
           .
         } %>%
