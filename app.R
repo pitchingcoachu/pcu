@@ -6001,18 +6001,10 @@ session_type_choices <- function() {
 
 # Marker-based school verification removed: keep configured allowed player lists as-is.
 
-# Keep the full dataset for Hitting & global refs
-# but build a PITCHING-ONLY copy that is filtered to the whitelist
-# (affects Pitching, Comparison, Leaderboard modules that use pitch_data_pitching)
-# If you ever want admins to bypass this, wrap the filter in `if (!is_admin()) { ... }`.
-pitch_data_pitching <- pitch_data %>%
-  dplyr::mutate(
-    Pitcher = as.character(Pitcher),
-    # Build a "First Last" display from "Last, First" for matching either style
-    .disp = ifelse(grepl(",", Pitcher),
-                   paste0(trimws(sub(".*,", "", Pitcher)), " ", trimws(sub(",.*", "", Pitcher))),
-                   Pitcher)
-  )
+# Keep the full dataset for Hitting & global refs, but build a PITCHING-only
+# copy filtered to the whitelist.
+pitch_data_pitching <- pitch_data
+pitch_data_pitching$Pitcher <- as.character(pitch_data_pitching$Pitcher)
 
 # Accept either "Last, First" or "First Last" in ALLOWED_PITCHERS
 ALLOWED_PITCHERS_DL <- unique(c(
@@ -6040,7 +6032,7 @@ ALLOWED_CAMPERS_DL <- unique(c(
 ALL_ALLOWED_PITCHERS <- unique(c(ALLOWED_PITCHERS_DL, ALLOWED_CAMPERS_DL))
 ALL_ALLOWED_HITTERS  <- unique(c(ALLOWED_HITTERS_DL,  ALLOWED_CAMPERS_DL))
 
-# Robust, case/spacing/punctuation-insensitive filter
+# Robust, case/spacing/punctuation-insensitive filter.
 allowed_norm <- norm_name_ci(ALL_ALLOWED_PITCHERS)
 
 workload_filter_players_by_team <- function(names, team_type = "All") {
@@ -6068,13 +6060,23 @@ workload_filter_players_by_team <- function(names, team_type = "All") {
   sort(unique(res))
 }
 
-pitch_data_pitching <- pitch_data_pitching %>%
-  dplyr::mutate(.norm_raw  = norm_name_ci(Pitcher),
-                .norm_disp = norm_name_ci(.disp)) %>%
-  dplyr::filter(.norm_raw %in% allowed_norm | .norm_disp %in% allowed_norm) %>%
-  dplyr::select(-.disp, -.norm_raw, -.norm_disp)
+# Use a single-pass base-R mask to avoid large dplyr copies at startup.
+pitcher_raw <- pitch_data_pitching$Pitcher
+pitcher_disp <- ifelse(
+  grepl(",", pitcher_raw),
+  paste0(trimws(sub(".*,", "", pitcher_raw)), " ", trimws(sub(",.*", "", pitcher_raw))),
+  pitcher_raw
+)
+mask_pitching <- norm_name_ci(pitcher_raw) %in% allowed_norm |
+  norm_name_ci(pitcher_disp) %in% allowed_norm
+mask_pitching[is.na(mask_pitching)] <- FALSE
+pitch_data_pitching <- pitch_data_pitching[mask_pitching, , drop = FALSE]
 
-pitch_data_pitching <- ensure_pitch_keys(pitch_data_pitching)
+# Only compute PitchKey when missing/blank to avoid expensive recomputation.
+if (!"PitchKey" %in% names(pitch_data_pitching) ||
+    any(is.na(pitch_data_pitching$PitchKey) | !nzchar(as.character(pitch_data_pitching$PitchKey)))) {
+  pitch_data_pitching <- ensure_pitch_keys(pitch_data_pitching)
+}
 
 # Name map for Pitching UI (restricted to the filtered set)
 raw_names_p <- sort(unique(pitch_data_pitching$Pitcher))
