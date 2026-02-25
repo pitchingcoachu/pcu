@@ -21758,6 +21758,10 @@ ensure_manual_velocity_table <- function(con) {
 }
 
 load_manual_velocity_entries <- function(app_id = current_school()) {
+  app_id_scalar <- as.character(app_id %||% current_school())
+  app_id_scalar <- app_id_scalar[!is.na(app_id_scalar) & nzchar(app_id_scalar)]
+  app_id_scalar <- if (length(app_id_scalar)) app_id_scalar[[1]] else as.character(current_school())
+
   empty_tbl <- tibble::tibble(
     id = character(),
     app_id = character(),
@@ -21779,7 +21783,7 @@ load_manual_velocity_entries <- function(app_id = current_school()) {
     if (!is.null(con)) {
       on.exit(tryCatch(DBI::dbDisconnect(con), error = function(e) NULL), add = TRUE)
       try(ensure_manual_velocity_table(con), silent = TRUE)
-      quoted_app <- DBI::dbQuoteString(con, app_id)
+      quoted_app <- DBI::dbQuoteString(con, app_id_scalar)
       sql <- sprintf(
         "SELECT id, app_id, entry_date, pitcher, throw_type, plyo_drill, ball_weight_oz, velocity_mph, notes, created_at
          FROM manual_velocity_entries
@@ -21802,7 +21806,7 @@ load_manual_velocity_entries <- function(app_id = current_school()) {
   }
 
   if (!"id" %in% names(df)) df$id <- sprintf("legacy_%s", seq_len(nrow(df)))
-  if (!"app_id" %in% names(df)) df$app_id <- rep(app_id, nrow(df))
+  if (!"app_id" %in% names(df)) df$app_id <- rep(app_id_scalar, nrow(df))
   if (!"entry_date" %in% names(df)) df$entry_date <- as.Date(NA_real_)[seq_len(nrow(df))]
   if (!"pitcher" %in% names(df)) df$pitcher <- character(nrow(df))
   if (!"throw_type" %in% names(df)) df$throw_type <- character(nrow(df))
@@ -21813,7 +21817,7 @@ load_manual_velocity_entries <- function(app_id = current_school()) {
   if (!"created_at" %in% names(df)) df$created_at <- rep(as.character(Sys.time()), nrow(df))
   df <- df %>%
     dplyr::mutate(
-      app_id = rep(as.character(app_id), dplyr::n()),
+      app_id = app_id_scalar,
       entry_date = suppressWarnings(as.Date(entry_date)),
       pitcher = as.character(pitcher %||% ""),
       throw_type = as.character(throw_type %||% ""),
@@ -21823,10 +21827,14 @@ load_manual_velocity_entries <- function(app_id = current_school()) {
       notes = as.character(notes %||% ""),
       created_at = suppressWarnings(as.POSIXct(created_at, tz = "UTC"))
     )
-  df[df$app_id == app_id, , drop = FALSE]
+  df[df$app_id == app_id_scalar, , drop = FALSE]
 }
 
 save_manual_velocity_entries <- function(entries, app_id = current_school()) {
+  app_id_scalar <- as.character(app_id %||% current_school())
+  app_id_scalar <- app_id_scalar[!is.na(app_id_scalar) & nzchar(app_id_scalar)]
+  app_id_scalar <- if (length(app_id_scalar)) app_id_scalar[[1]] else as.character(current_school())
+
   backend <- manual_velocity_backend()
 
   ensure_workload_data_dir()
@@ -21834,7 +21842,7 @@ save_manual_velocity_entries <- function(entries, app_id = current_school()) {
   normalize_manual_velocity_types <- function(df) {
     if (is.null(df) || !nrow(df)) return(as.data.frame(df, stringsAsFactors = FALSE))
     if (!"id" %in% names(df)) df$id <- sprintf("mv_legacy_%s", seq_len(nrow(df)))
-    if (!"app_id" %in% names(df)) df$app_id <- rep(app_id, nrow(df))
+    if (!"app_id" %in% names(df)) df$app_id <- rep(app_id_scalar, nrow(df))
     if (!"entry_date" %in% names(df)) df$entry_date <- as.Date(NA_real_)[seq_len(nrow(df))]
     if (!"pitcher" %in% names(df)) df$pitcher <- character(nrow(df))
     if (!"throw_type" %in% names(df)) df$throw_type <- character(nrow(df))
@@ -21868,7 +21876,7 @@ save_manual_velocity_entries <- function(entries, app_id = current_school()) {
       ok <- tryCatch({
         ensure_manual_velocity_table(con)
         DBI::dbBegin(con)
-        quoted_app <- DBI::dbQuoteString(con, app_id)
+        quoted_app <- DBI::dbQuoteString(con, app_id_scalar)
         DBI::dbExecute(con, sprintf("DELETE FROM manual_velocity_entries WHERE app_id = %s", quoted_app))
         if (nrow(entries)) {
           DBI::dbWriteTable(con, "manual_velocity_entries", entries, append = TRUE, row.names = FALSE)
