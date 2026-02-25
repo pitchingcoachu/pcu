@@ -5613,7 +5613,7 @@ need_cols <- c(
 
 
 
-for (nm in need_cols) if (!nm %in% names(pitch_data)) pitch_data[[nm]] <- NA_character_
+for (nm in need_cols) if (!nm %in% names(pitch_data)) pitch_data[[nm]] <- rep(NA_character_, nrow(pitch_data))
 
 # Type cleanup + standardization (now safe to coerce)
 pitch_data <- pitch_data %>%

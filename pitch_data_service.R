@@ -598,7 +598,7 @@ load_pitch_data_from_postgres <- function(school_code = "", startup_logger = NUL
   # Keep only app-facing columns; SourceFile/all_csvs remain available for diagnostics.
   app_cols <- pitch_data_default_columns()
   for (nm in app_cols) {
-    if (!nm %in% names(df)) df[[nm]] <- NA
+    if (!nm %in% names(df)) df[[nm]] <- rep(NA, nrow(df))
   }
   df <- df[, app_cols, drop = FALSE]
 
@@ -775,7 +775,7 @@ sync_csv_file_to_neon <- function(con, csv_path, school_code = "") {
   }
 
   for (nm in cols_needed) {
-    if (!nm %in% names(df)) df[[nm]] <- NA_character_
+    if (!nm %in% names(df)) df[[nm]] <- rep(NA_character_, nrow(df))
   }
 
   # Derive session/date fields used for indexing and keyset paging.
