@@ -5806,6 +5806,7 @@ pitch_data <- dplyr::left_join(pitch_data, lookup_table, by = "Pitcher") %>%
   dplyr::mutate(Email = dplyr::coalesce(Email, Email_lookup)) %>%
   dplyr::select(-Email_lookup)
 log_startup_timing("Joined lookup_table and finalized Email")
+log_startup_timing("Prepared global pitch datasets and lookup joins")
 
 
 # (keep your name_map construction the same)
@@ -21947,6 +21948,7 @@ admin_emails <- c(
 # They will only see data where Email matches their login email
 
 
+log_startup_timing("Starting UI object construction")
 ui <- tagList(
   # --- Custom navbar colors & styling ---
   tags$head(
@@ -23608,6 +23610,7 @@ ui <- tagList(
     tabPanel("Logout", value = "Logout", fluidPage())
   )
 )
+log_startup_timing("Completed UI object construction")
 
 # Custom authentication disabled - using shinyapps.io native authentication
 
@@ -38288,5 +38291,8 @@ deg_to_clock <- function(x) {
   custom_reports_server("creports")
 }
 # ---------- Run ----------
-shinyApp(ui=ui, server=server)# app.R
+log_startup_timing("Registering shiny app object")
+app <- shinyApp(ui = ui, server = server) # app.R
+log_startup_timing("Shiny app object ready")
+app
 # Shiny pitching report with per-player privacy + admin view + customized Stuff+ metric per pitch type
