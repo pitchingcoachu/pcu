@@ -1461,7 +1461,6 @@ ensure_pitch_keys <- function(df) {
 
 deduplicate_pitch_rows <- function(df, fast = FALSE) {
   if (!nrow(df)) return(df)
-  df <- ensure_pitch_keys(df)
   if (!"PitchKey" %in% names(df)) return(df)
   if (!any(!is.na(df$PitchKey) & nzchar(as.character(df$PitchKey)))) return(df)
   key_chr <- as.character(df$PitchKey)

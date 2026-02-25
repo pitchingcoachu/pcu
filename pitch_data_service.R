@@ -23,6 +23,51 @@ pitch_data_default_columns <- function() {
   )
 }
 
+pitch_data_make_key <- function(df) {
+  if (!nrow(df)) return(character(0))
+  safe_chr <- function(x) {
+    x <- as.character(x)
+    x[is.na(x)] <- ""
+    trimws(x)
+  }
+  pick <- function(nm) {
+    if (nm %in% names(df)) safe_chr(df[[nm]]) else rep("", nrow(df))
+  }
+
+  key_uid <- pick("PitchUID")
+  key_pid <- pick("PitchID")
+  key_pguid <- pick("PitchGuid")
+  key_play <- pick("PlayID")
+
+  # Stable fallback hash when upstream IDs are missing.
+  base <- paste(
+    pick("Date"),
+    pick("Pitcher"),
+    pick("Batter"),
+    key_play,
+    pick("PitchCall"),
+    pick("PlayResult"),
+    pick("TaggedPitchType"),
+    pick("Balls"),
+    pick("Strikes"),
+    pick("RelSpeed"),
+    pick("InducedVertBreak"),
+    pick("HorzBreak"),
+    pick("Extension"),
+    pick("PlateLocSide"),
+    pick("PlateLocHeight"),
+    sep = "|"
+  )
+  key_hash <- vapply(base, function(x) digest::digest(x, algo = "xxhash64", serialize = FALSE), character(1))
+
+  out <- ifelse(nzchar(key_uid), key_uid,
+                ifelse(nzchar(key_pid), key_pid,
+                       ifelse(nzchar(key_pguid), key_pguid,
+                              ifelse(nzchar(key_play), key_play, key_hash))))
+  out[is.na(out)] <- ""
+  out
+}
+
 pitch_data_storage_name_map <- function() {
   c(
     Date = "date",
@@ -671,6 +716,35 @@ ensure_pitch_data_schema <- function(con = NULL, schema_sql_path = file.path("db
   invisible(TRUE)
 }
 
+ensure_pitch_key_unique_guard <- function(con, school_code = "") {
+  school_code <- toupper(trimws(as.character(school_code)))
+  if (!nzchar(school_code)) school_code <- toupper(trimws(Sys.getenv("TEAM_CODE", "")))
+  if (!nzchar(school_code)) return(invisible(FALSE))
+
+  schema <- gsub("[^A-Za-z0-9_]", "_", Sys.getenv("PITCH_DATA_DB_SCHEMA", "public"))
+  tbl <- DBI::Id(schema = schema, table = Sys.getenv("PITCH_DATA_DB_TABLE", "pitch_events"))
+  idx_name <- sprintf(
+    "idx_pitch_events_%s_pitch_key_unique",
+    tolower(gsub("[^A-Za-z0-9_]", "_", school_code))
+  )
+
+  sql <- sprintf(
+    "CREATE UNIQUE INDEX IF NOT EXISTS %s ON %s (school_code, pitch_key)
+     WHERE school_code = %s AND pitch_key IS NOT NULL AND btrim(pitch_key) <> ''",
+    as.character(DBI::dbQuoteIdentifier(con, idx_name)),
+    as.character(DBI::dbQuoteIdentifier(con, tbl)),
+    as.character(DBI::dbQuoteLiteral(con, school_code))
+  )
+
+  tryCatch({
+    DBI::dbExecute(con, sql)
+    TRUE
+  }, error = function(e) {
+    message("Unable to ensure pitch-key unique guard for ", school_code, ": ", e$message)
+    FALSE
+  })
+}
+
 sync_csv_file_to_neon <- function(con, csv_path, school_code = "") {
   school_code <- toupper(trimws(as.character(school_code)))
   if (!nzchar(school_code)) school_code <- toupper(trimws(Sys.getenv("TEAM_CODE", "OSU")))
@@ -837,11 +911,18 @@ sync_csv_file_to_neon <- function(con, csv_path, school_code = "") {
   )
   DBI::dbExecute(con, del_sql)
 
+  pitch_key_existing <- if ("PitchKey" %in% names(df)) as.character(df$PitchKey) else rep("", nrow(df))
+  pitch_key_existing[is.na(pitch_key_existing)] <- ""
+  needs_key <- !nzchar(trimws(pitch_key_existing))
+  if (any(needs_key)) {
+    pitch_key_existing[needs_key] <- pitch_data_make_key(df[needs_key, , drop = FALSE])
+  }
+
   df$school_code <- school_code
   df$file_id <- as.integer(file_id)
   df$session_date <- as.character(parsed_date)
   df$session_type <- as.character(df$SessionType)
-  df$pitch_key <- as.character(if ("PitchKey" %in% names(df)) df$PitchKey else NA_character_)
+  df$pitch_key <- as.character(pitch_key_existing)
   df$source_file <- source_file
 
   name_map <- pitch_data_storage_name_map()
@@ -862,7 +943,22 @@ sync_csv_file_to_neon <- function(con, csv_path, school_code = "") {
     db_df[[db_nm]] <- if (nm %in% names(df)) as.character(df[[nm]]) else NA_character_
   }
 
-  DBI::dbWriteTable(con, etbl, db_df, append = TRUE, row.names = FALSE)
+  tmp_tbl <- paste0("pitch_events_stage_", as.integer(Sys.time()), "_", sample.int(1e6, 1))
+  on.exit(tryCatch(DBI::dbRemoveTable(con, DBI::Id(table = tmp_tbl)), error = function(...) NULL), add = TRUE)
+  DBI::dbWriteTable(con, DBI::Id(table = tmp_tbl), db_df, temporary = TRUE, overwrite = TRUE, row.names = FALSE)
+
+  col_names <- names(db_df)
+  cols_sql <- paste(vapply(col_names, function(nm) as.character(DBI::dbQuoteIdentifier(con, nm)), character(1)), collapse = ", ")
+  insert_sql <- sprintf(
+    "INSERT INTO %s (%s)
+     SELECT %s FROM %s
+     ON CONFLICT DO NOTHING",
+    as.character(DBI::dbQuoteIdentifier(con, etbl)),
+    cols_sql,
+    cols_sql,
+    as.character(DBI::dbQuoteIdentifier(con, DBI::Id(table = tmp_tbl)))
+  )
+  DBI::dbExecute(con, insert_sql)
   invisible(nrow(db_df))
 }
 
@@ -871,6 +967,7 @@ sync_csv_tree_to_neon <- function(data_dir = file.path("data"), school_code = ""
   on.exit(tryCatch(DBI::dbDisconnect(con), error = function(...) NULL), add = TRUE)
 
   ensure_pitch_data_schema(con)
+  ensure_pitch_key_unique_guard(con, school_code = school_code)
 
   csvs <- list.files(data_dir, pattern = "\\.csv$", recursive = TRUE, full.names = TRUE)
   csvs <- csvs[grepl("([/\\\\]practice[/\\\\])|([/\\\\]v3[/\\\\])", tolower(csvs))]
