@@ -5758,13 +5758,10 @@ log_startup_timing("Completed video map merge/attachment")
 pitch_data <- ensure_pitch_keys(pitch_data)
 log_startup_timing("Computed/validated PitchKey values")
 rows_before_dedupe <- nrow(pitch_data)
-if (isTRUE(pitch_data_loaded_from_backend)) {
-  # Backend data is already canonicalized; avoid expensive startup dedupe in app process.
-  rows_removed_dedupe <- 0L
-} else {
-  pitch_data <- deduplicate_pitch_rows(pitch_data, fast = FALSE)
-  rows_removed_dedupe <- rows_before_dedupe - nrow(pitch_data)
-}
+# Keep startup dedupe cheap and always on to prevent doubled rows when upstream sync
+# includes overlapping files for the same PitchKey.
+pitch_data <- deduplicate_pitch_rows(pitch_data, fast = TRUE)
+rows_removed_dedupe <- rows_before_dedupe - nrow(pitch_data)
 rows_after_dedupe <- nrow(pitch_data)
 log_startup_timing(sprintf("Deduplicated pitch rows (removed=%d)", rows_removed_dedupe))
 
@@ -6060,16 +6057,25 @@ workload_filter_players_by_team <- function(names, team_type = "All") {
   sort(unique(res))
 }
 
-# Use a single-pass base-R mask to avoid large dplyr copies at startup.
-pitcher_raw <- pitch_data_pitching$Pitcher
-pitcher_disp <- ifelse(
-  grepl(",", pitcher_raw),
-  paste0(trimws(sub(".*,", "", pitcher_raw)), " ", trimws(sub(",.*", "", pitcher_raw))),
-  pitcher_raw
-)
-mask_pitching <- norm_name_ci(pitcher_raw) %in% allowed_norm |
-  norm_name_ci(pitcher_disp) %in% allowed_norm
-mask_pitching[is.na(mask_pitching)] <- FALSE
+# Build an allowed lookup at unique-name level; this avoids repeated regex work
+# over every row and removes the startup hotspot.
+pitcher_raw <- as.character(pitch_data_pitching$Pitcher)
+uniq_pitchers <- unique(pitcher_raw)
+uniq_pitchers <- uniq_pitchers[!is.na(uniq_pitchers)]
+if (length(uniq_pitchers)) {
+  uniq_disp <- ifelse(
+    grepl(",", uniq_pitchers),
+    paste0(trimws(sub(".*,", "", uniq_pitchers)), " ", trimws(sub(",.*", "", uniq_pitchers))),
+    uniq_pitchers
+  )
+  uniq_allowed <- norm_name_ci(uniq_pitchers) %in% allowed_norm |
+    norm_name_ci(uniq_disp) %in% allowed_norm
+  allowed_lookup <- setNames(uniq_allowed, uniq_pitchers)
+  mask_pitching <- unname(allowed_lookup[pitcher_raw])
+  mask_pitching[is.na(mask_pitching)] <- FALSE
+} else {
+  mask_pitching <- rep(FALSE, nrow(pitch_data_pitching))
+}
 pitch_data_pitching <- pitch_data_pitching[mask_pitching, , drop = FALSE]
 
 # Only compute PitchKey when missing/blank to avoid expensive recomputation.

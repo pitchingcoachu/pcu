@@ -546,6 +546,17 @@ main_sync <- function() {
     cat("Regenerated data/video_map.csv from Neon video metadata\n")
   }
 
+  if (exists("video_map_backfill_local_to_neon", mode = "function")) {
+    tryCatch({
+      backfilled <- video_map_backfill_local_to_neon(file.path(LOCAL_DATA_DIR, "video_map.csv"))
+      if (isTRUE(backfilled)) {
+        cat("Backfilled local video_map.csv rows into Neon video_map table\n")
+      }
+    }, error = function(e) {
+      cat("Skipping local->Neon video map backfill:", e$message, "\n")
+    })
+  }
+
   pitch_neon_updated <- FALSE
   pitch_sync_enabled <- tryCatch(
     if (exists("pitch_data_parse_bool", mode = "function")) {

@@ -33,6 +33,10 @@ suppressPackageStartupMessages({
   library(glue)
 })
 
+if (file.exists("video_map_helpers.R")) {
+  source("video_map_helpers.R")
+}
+
 # ---- Helpers ---------------------------------------------------------------
 
 get_script_path <- function() {
@@ -524,6 +528,17 @@ main <- function() {
     video_map <- bind_rows(video_map, additions) %>% distinct()
     dir.create(dirname(paths$video_map), recursive = TRUE, showWarnings = FALSE)
     append_video_map(video_map, paths$video_map)
+
+    if (exists("video_map_write_rows_to_neon", mode = "function")) {
+      neon_ok <- tryCatch(video_map_write_rows_to_neon(additions), error = function(e) {
+        message(glue(">> Neon video map write failed: {e$message}"))
+        FALSE
+      })
+      if (isTRUE(neon_ok)) {
+        message(glue(">> Synced {nrow(additions)} new video rows to Neon."))
+      }
+    }
+
     message(glue(">> Added {nrow(additions)} new video mapping rows."))
   } else {
     message(">> No new videos uploaded.")

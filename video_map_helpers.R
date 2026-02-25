@@ -183,6 +183,10 @@ video_map_db_config <- local({
   function() {
     if (!is.null(cache)) return(cache)
     url <- Sys.getenv("VIDEO_MAP_DB_URL", "")
+    if (!nzchar(url)) {
+      # Default video-map storage to the same Neon instance as pitch data.
+      url <- Sys.getenv("PITCH_DATA_DB_URL", "")
+    }
     cfg <- NULL
     if (nzchar(url)) {
       cfg <- parse_video_map_postgres_uri(url)
@@ -263,6 +267,42 @@ video_map_db_connect <- function() {
   })
 }
 
+video_map_db_execute <- function(con, sql) {
+  tryCatch(
+    DBI::dbExecute(con, sql),
+    error = function(e1) {
+      msg <- conditionMessage(e1)
+      recoverable <- grepl(
+        "unnamed prepared statement does not exist|query needs to be bound before fetching",
+        msg,
+        ignore.case = TRUE
+      )
+      if (!recoverable) stop(e1)
+      res <- DBI::dbSendStatement(con, sql)
+      on.exit(tryCatch(DBI::dbClearResult(res), error = function(...) NULL), add = TRUE)
+      DBI::dbGetRowsAffected(res)
+    }
+  )
+}
+
+video_map_db_get_query <- function(con, sql) {
+  tryCatch(
+    DBI::dbGetQuery(con, sql),
+    error = function(e1) {
+      msg <- conditionMessage(e1)
+      recoverable <- grepl(
+        "unnamed prepared statement does not exist|query needs to be bound before fetching",
+        msg,
+        ignore.case = TRUE
+      )
+      if (!recoverable) stop(e1)
+      res <- DBI::dbSendQuery(con, sql)
+      on.exit(tryCatch(DBI::dbClearResult(res), error = function(...) NULL), add = TRUE)
+      DBI::dbFetch(res)
+    }
+  )
+}
+
 video_map_table_name <- function() {
   tbl <- Sys.getenv("VIDEO_MAP_DB_TABLE", "video_map")
   tbl <- gsub("[^A-Za-z0-9_]", "_", tbl, perl = TRUE)
@@ -273,7 +313,7 @@ video_map_table_name <- function() {
 video_map_ensure_table <- function(con, table) {
   if (is.null(con)) return(FALSE)
   tbl_id <- DBI::dbQuoteIdentifier(con, table)
-  DBI::dbExecute(con, glue("
+  video_map_db_execute(con, glue("
     CREATE TABLE IF NOT EXISTS {tbl_id} (
       session_id TEXT NOT NULL,
       play_id TEXT NOT NULL,
@@ -433,10 +473,11 @@ map_manifest_to_session <- function(session_rows,
 }
 
 video_map_write_rows_to_neon <- function(rows) {
+  rows <- normalize_video_map_df(rows)
   rows <- rows %>% dplyr::select(all_of(VIDEO_MAP_TABLE_COLUMNS))
   rows$uploaded_at <- ifelse(
     nzchar(as.character(rows$uploaded_at)),
-    rows$uploaded_at,
+    as.character(rows$uploaded_at),
     format(Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
   )
   con <- video_map_db_connect()
@@ -447,24 +488,49 @@ video_map_write_rows_to_neon <- function(rows) {
   on.exit(DBI::dbDisconnect(con), add = TRUE)
   tbl <- video_map_table_name()
   video_map_ensure_table(con, tbl)
-  update_cols <- setdiff(VIDEO_MAP_TABLE_COLUMNS, c("session_id", "camera_slot", "play_id"))
-  id_cols <- c("session_id", "camera_slot", "play_id")
-  for (i in seq_len(nrow(rows))) {
-    row <- rows[i, , drop = FALSE]
-    cols <- VIDEO_MAP_TABLE_COLUMNS
-    values <- vapply(row[cols], function(x) DBI::dbQuoteLiteral(con, ifelse(is.na(x), NA_character_, as.character(x))), character(1))
-    insert_cols <- paste(DBI::dbQuoteIdentifier(con, cols), collapse = ", ")
-    insert_vals <- paste(values, collapse = ", ")
-    conflict_cols <- paste(DBI::dbQuoteIdentifier(con, id_cols), collapse = ", ")
-    idents <- DBI::dbQuoteIdentifier(con, update_cols)
-    updates <- paste(paste0(idents, " = EXCLUDED.", idents), collapse = ", ")
-    sql <- glue("
-      INSERT INTO {DBI::dbQuoteIdentifier(con, tbl)} ({insert_cols})
-      VALUES ({insert_vals})
-      ON CONFLICT ({conflict_cols}) DO UPDATE SET {updates}
-    ")
-    DBI::dbExecute(con, sql)
-  }
+
+  tmp_tbl <- paste0("video_map_stage_", as.integer(as.numeric(Sys.time())), "_", sample.int(1e6, 1))
+  tmp_id <- DBI::dbQuoteIdentifier(con, DBI::Id(table = tmp_tbl))
+  on.exit(
+    tryCatch(video_map_db_execute(con, sprintf("DROP TABLE IF EXISTS %s", as.character(tmp_id))), error = function(...) NULL),
+    add = TRUE
+  )
+  DBI::dbWriteTable(con, DBI::Id(table = tmp_tbl), rows, temporary = TRUE, overwrite = TRUE)
+
+  tbl_id <- DBI::dbQuoteIdentifier(con, tbl)
+  sql <- glue("
+    INSERT INTO {tbl_id}
+    (session_id, play_id, camera_slot, camera_name, camera_target, video_type, azure_blob, azure_md5, cloudinary_url, cloudinary_public_id, uploaded_at)
+    SELECT DISTINCT ON (session_id, camera_slot, play_id)
+      session_id,
+      play_id,
+      camera_slot,
+      camera_name,
+      camera_target,
+      video_type,
+      azure_blob,
+      azure_md5,
+      cloudinary_url,
+      cloudinary_public_id,
+      NULLIF(uploaded_at, '')::timestamptz
+    FROM {tmp_id}
+    ORDER BY
+      session_id,
+      camera_slot,
+      play_id,
+      NULLIF(uploaded_at, '')::timestamptz DESC NULLS LAST
+    ON CONFLICT (session_id, camera_slot, play_id)
+    DO UPDATE SET
+      camera_name = EXCLUDED.camera_name,
+      camera_target = EXCLUDED.camera_target,
+      video_type = EXCLUDED.video_type,
+      azure_blob = EXCLUDED.azure_blob,
+      azure_md5 = EXCLUDED.azure_md5,
+      cloudinary_url = EXCLUDED.cloudinary_url,
+      cloudinary_public_id = EXCLUDED.cloudinary_public_id,
+      uploaded_at = EXCLUDED.uploaded_at
+  ")
+  video_map_db_execute(con, sql)
   TRUE
 }
 
@@ -499,4 +565,46 @@ video_map_sync_from_neon <- function(map_path = "data/video_map.csv") {
 
 sync_video_map_from_neon <- function(...) {
   video_map_sync_from_neon(...)
+}
+
+video_map_backfill_local_to_neon <- function(map_path = "data/video_map.csv") {
+  map_path <- path.expand(map_path)
+  if (!file.exists(map_path)) return(FALSE)
+
+  local_df <- tryCatch(
+    readr::read_csv(map_path, col_types = readr::cols(.default = readr::col_character()), show_col_types = FALSE),
+    error = function(e) {
+      message("Unable to read local video map for Neon backfill: ", e$message)
+      tibble::tibble()
+    }
+  )
+  local_df <- normalize_video_map_df(local_df)
+  if (!nrow(local_df)) return(FALSE)
+
+  con <- video_map_db_connect()
+  if (is.null(con)) return(FALSE)
+  on.exit(DBI::dbDisconnect(con), add = TRUE)
+  tbl <- video_map_table_name()
+  video_map_ensure_table(con, tbl)
+
+  neon_n <- tryCatch(
+    as.integer(video_map_db_get_query(con, sprintf("SELECT COUNT(*) AS n FROM %s", DBI::dbQuoteIdentifier(con, tbl)))$n[[1]]),
+    error = function(e) NA_integer_
+  )
+  local_n <- nrow(local_df)
+  force_backfill <- tolower(trimws(Sys.getenv("FORCE_VIDEO_MAP_NEON_BACKFILL", "false"))) %in% c("1", "true", "yes")
+
+  if (!force_backfill && is.finite(neon_n) && neon_n >= local_n) {
+    message("Skipping local->Neon video map backfill: Neon already has ", neon_n, " rows (local=", local_n, ").")
+    return(FALSE)
+  }
+
+  ok <- tryCatch(video_map_write_rows_to_neon(local_df), error = function(e) {
+    message("Local->Neon video map backfill failed: ", e$message)
+    FALSE
+  })
+  if (isTRUE(ok)) {
+    message("Backfilled local video map to Neon rows: ", local_n)
+  }
+  ok
 }
