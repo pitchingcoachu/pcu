@@ -6080,6 +6080,7 @@ pitch_data_pitching <- ensure_pitch_keys(pitch_data_pitching)
 raw_names_p <- sort(unique(pitch_data_pitching$Pitcher))
 display_names_p <- format_name_first_last(raw_names_p)
 name_map_pitching <- setNames(raw_names_p, display_names_p)
+log_startup_timing("Prepared pitching-only dataset and name maps")
 
 
 # ---- NEW: xStat reference bins from your data ----
@@ -6107,6 +6108,7 @@ x_overall <- xbin_ref %>%
     p1B = weighted.mean(p1B, n), p2B = weighted.mean(p2B, n),
     p3B = weighted.mean(p3B, n), pHR = weighted.mean(pHR, n)
   )
+log_startup_timing("Built xStat reference bins")
 
 # FanGraphs-like wOBA weights (approx)
 W_BB <- 0.69; W_1B <- 0.90; W_2B <- 1.24; W_3B <- 1.56; W_HR <- 1.95
@@ -6477,6 +6479,7 @@ compute_process_results <- function(df, mode = "All") {
 }
 
 # ---- Global table helpers shared by Pitching & Hitting ----
+log_startup_timing("Defined process/results calculators")
 safe_pct <- function(num, den) {
   num <- suppressWarnings(as.numeric(num))
   den <- suppressWarnings(as.numeric(den))
@@ -21628,6 +21631,7 @@ workload_panel_ui <- function() {
 }
 
 workload_data_dir <- function() file.path("data")
+log_startup_timing("Defined custom-report and workload helper functions")
 
 ensure_workload_data_dir <- function() {
   dir.create(workload_data_dir(), showWarnings = FALSE, recursive = TRUE)
@@ -21931,6 +21935,7 @@ workload_session_bucket_weights <- c(
 # ==================================
 # == AUTHENTICATION SETUP ==
 # ==================================
+log_startup_timing("Reached authentication/global setup boundary")
 
 # Using shinyapps.io native authentication instead of shinymanager
 # Three-tier access system:
