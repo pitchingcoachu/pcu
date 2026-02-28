@@ -5833,42 +5833,48 @@ log_startup_timing(sprintf("Completed type normalization/filtering (%d rows)", n
 # ---- Attach Cloudinary video URLs when available ----
 video_map_path <- file.path(data_parent, "video_map.csv")
 manual_map_path <- file.path(data_parent, "video_map_manual.csv")
-if (!"VideoClip"  %in% names(pitch_data)) pitch_data$VideoClip  <- NA_character_
-if (!"VideoClip2" %in% names(pitch_data)) pitch_data$VideoClip2 <- NA_character_
-if (!"VideoClip3" %in% names(pitch_data)) pitch_data$VideoClip3 <- NA_character_
+ensure_video_clip_columns <- function(df) {
+  if (!"VideoClip"  %in% names(df)) df$VideoClip  <- NA_character_
+  if (!"VideoClip2" %in% names(df)) df$VideoClip2 <- NA_character_
+  if (!"VideoClip3" %in% names(df)) df$VideoClip3 <- NA_character_
+  df
+}
+pitch_data <- ensure_video_clip_columns(pitch_data)
 pitch_play_ids <- unique(tolower(trimws(as.character(pitch_data$PlayID %||% character(0)))))
 pitch_play_ids <- pitch_play_ids[nzchar(pitch_play_ids)]
 
-# Combine EdgeR and manual/iPhone video maps
-video_maps <- list()
-enable_neon_video_map <- isTRUE(school_setting("enable_neon_video_map", TRUE))
-if (enable_neon_video_map && exists("video_map_read_all_neon", mode = "function")) {
-  neon_raw <- tryCatch(video_map_read_all_neon(play_ids = pitch_play_ids), error = function(e) tibble::tibble())
-  if (nrow(neon_raw) > 0) {
-    video_maps[["neon"]] <- neon_raw
-    message("☁️ Loaded ", nrow(neon_raw), " scoped videos from Neon")
-  } else {
-    message("☁️ Loaded 0 scoped videos from Neon (play_ids=", length(pitch_play_ids), ")")
-  }
-} else if (!enable_neon_video_map) {
-  message("🎥 Neon video map disabled for this school config")
-}
-if (file.exists(video_map_path)) {
-  edger_raw <- suppressMessages(readr::read_csv(video_map_path, show_col_types = FALSE))
-  if (nrow(edger_raw) > 0) {
-    video_maps[["edger"]] <- edger_raw
-    message("📹 Loaded ", nrow(edger_raw), " EdgeR videos")
-  }
-}
-if (file.exists(manual_map_path)) {
-  manual_raw <- suppressMessages(readr::read_csv(manual_map_path, show_col_types = FALSE))
-  if (nrow(manual_raw) > 0) {
-    video_maps[["manual"]] <- manual_raw
-    message("📱 Loaded ", nrow(manual_raw), " iPhone videos")
-  }
-}
+video_map_wide_cache <- NULL
+video_map_cache_ready <- FALSE
 
-if (length(video_maps) > 0) {
+load_combined_video_map_wide <- function(play_ids = NULL) {
+  video_maps <- list()
+  enable_neon_video_map <- isTRUE(school_setting("enable_neon_video_map", TRUE))
+  if (enable_neon_video_map && exists("video_map_read_all_neon", mode = "function")) {
+    neon_raw <- tryCatch(video_map_read_all_neon(play_ids = play_ids), error = function(e) tibble::tibble())
+    if (nrow(neon_raw) > 0) {
+      video_maps[["neon"]] <- neon_raw
+      message("☁️ Loaded ", nrow(neon_raw), " scoped videos from Neon")
+    } else {
+      message("☁️ Loaded 0 scoped videos from Neon (play_ids=", length(play_ids %||% character(0)), ")")
+    }
+  } else if (!enable_neon_video_map) {
+    message("🎥 Neon video map disabled for this school config")
+  }
+  if (file.exists(video_map_path)) {
+    edger_raw <- suppressMessages(readr::read_csv(video_map_path, show_col_types = FALSE))
+    if (nrow(edger_raw) > 0) {
+      video_maps[["edger"]] <- edger_raw
+      message("📹 Loaded ", nrow(edger_raw), " EdgeR videos")
+    }
+  }
+  if (file.exists(manual_map_path)) {
+    manual_raw <- suppressMessages(readr::read_csv(manual_map_path, show_col_types = FALSE))
+    if (nrow(manual_raw) > 0) {
+      video_maps[["manual"]] <- manual_raw
+      message("📱 Loaded ", nrow(manual_raw), " iPhone videos")
+    }
+  }
+  if (!length(video_maps)) return(tibble::tibble())
   video_maps <- lapply(video_maps, function(df) {
     if (!is.data.frame(df)) return(df)
     if ("uploaded_at" %in% names(df)) {
@@ -5878,65 +5884,115 @@ if (length(video_maps) > 0) {
   })
   vm_raw <- dplyr::bind_rows(video_maps) %>% dplyr::distinct()
   message("🎬 Combined total: ", nrow(vm_raw), " videos available")
-  if (nrow(vm_raw)) {
-    vm_wide <- vm_raw %>%
-      dplyr::mutate(
-        play_id = tolower(as.character(play_id)),
-        camera_slot = dplyr::case_when(
-          camera_slot %in% c("VideoClip","VideoClip2","VideoClip3") ~ camera_slot,
-          TRUE ~ NA_character_
-        ),
-        uploaded_at = suppressWarnings(lubridate::ymd_hms(uploaded_at, quiet = TRUE, tz = "UTC"))
-      ) %>%
-      dplyr::filter(
-        nzchar(play_id),
-        !is.na(camera_slot),
-        nzchar(cloudinary_url)
-      ) %>%
-      dplyr::arrange(play_id, camera_slot, dplyr::desc(uploaded_at)) %>%
-      dplyr::group_by(play_id, camera_slot) %>%
-      dplyr::slice_head(n = 1) %>%
-      dplyr::ungroup() %>%
-      tidyr::pivot_wider(
-        id_cols = play_id,
-        names_from = camera_slot,
-        values_from = cloudinary_url
-      )
-    
-    if (nrow(vm_wide)) {
-      pitch_data <- pitch_data %>%
-        dplyr::mutate(
-          VideoClip = as.character(VideoClip),
-          VideoClip2 = as.character(VideoClip2),
-          VideoClip3 = as.character(VideoClip3)
-        ) %>%
-        dplyr::mutate(.play_lower = tolower(as.character(PlayID))) %>%
-        dplyr::left_join(vm_wide, by = c(".play_lower" = "play_id"), suffix = c("", ".vm")) %>%
-        { 
-          vm_cols <- paste0(c("VideoClip","VideoClip2","VideoClip3"), ".vm")
-          for (vm_col in vm_cols) {
-            if (!vm_col %in% names(.)) .[[vm_col]] <- rep(NA_character_, nrow(.))
-            .[[vm_col]] <- as.character(.[[vm_col]])
-          }
-          .
-        } %>%
-        dplyr::mutate(
-          VideoClip  = dplyr::coalesce(.data[["VideoClip.vm"]],  VideoClip),
-          VideoClip2 = dplyr::coalesce(.data[["VideoClip2.vm"]], VideoClip2),
-          VideoClip3 = dplyr::coalesce(.data[["VideoClip3.vm"]], VideoClip3)
-        ) %>%
-        dplyr::select(-dplyr::ends_with(".vm"), -.play_lower)
-      matched_videos <- sum(nzchar(pitch_data$VideoClip %||% ""))
-      message("✅ Attached videos for ", matched_videos, " pitches from combined maps")
-      if (!matched_videos) {
-        message("⚠️  No video matches found for current pitch_data PlayID values.")
-      }
-    } else {
-      message("⚠️  Video maps loaded but no rows matched PlayID in pitch data.")
-    }
-  }
+  if (!nrow(vm_raw)) return(tibble::tibble())
+  vm_raw %>%
+    dplyr::mutate(
+      play_id = tolower(as.character(play_id)),
+      camera_slot = dplyr::case_when(
+        camera_slot %in% c("VideoClip", "VideoClip2", "VideoClip3") ~ camera_slot,
+        TRUE ~ NA_character_
+      ),
+      uploaded_at = suppressWarnings(lubridate::ymd_hms(uploaded_at, quiet = TRUE, tz = "UTC"))
+    ) %>%
+    dplyr::filter(
+      nzchar(play_id),
+      !is.na(camera_slot),
+      nzchar(cloudinary_url)
+    ) %>%
+    dplyr::arrange(play_id, camera_slot, dplyr::desc(uploaded_at)) %>%
+    dplyr::group_by(play_id, camera_slot) %>%
+    dplyr::slice_head(n = 1) %>%
+    dplyr::ungroup() %>%
+    tidyr::pivot_wider(
+      id_cols = play_id,
+      names_from = camera_slot,
+      values_from = cloudinary_url
+    )
 }
-log_startup_timing("Completed video map merge/attachment")
+
+attach_video_clips_from_wide <- function(df, vm_wide) {
+  df <- ensure_video_clip_columns(df)
+  if (!"PlayID" %in% names(df)) return(df)
+  if (is.null(vm_wide) || !nrow(vm_wide)) return(df)
+  df %>%
+    dplyr::mutate(
+      VideoClip = as.character(VideoClip),
+      VideoClip2 = as.character(VideoClip2),
+      VideoClip3 = as.character(VideoClip3)
+    ) %>%
+    dplyr::mutate(.play_lower = tolower(as.character(PlayID))) %>%
+    dplyr::left_join(vm_wide, by = c(".play_lower" = "play_id"), suffix = c("", ".vm")) %>%
+    {
+      vm_cols <- paste0(c("VideoClip", "VideoClip2", "VideoClip3"), ".vm")
+      for (vm_col in vm_cols) {
+        if (!vm_col %in% names(.)) .[[vm_col]] <- rep(NA_character_, nrow(.))
+        .[[vm_col]] <- as.character(.[[vm_col]])
+      }
+      .
+    } %>%
+    dplyr::mutate(
+      VideoClip = dplyr::coalesce(.data[["VideoClip.vm"]], VideoClip),
+      VideoClip2 = dplyr::coalesce(.data[["VideoClip2.vm"]], VideoClip2),
+      VideoClip3 = dplyr::coalesce(.data[["VideoClip3.vm"]], VideoClip3)
+    ) %>%
+    dplyr::select(-dplyr::ends_with(".vm"), -.play_lower)
+}
+
+ensure_video_map_loaded <- function(force = FALSE) {
+  if (!isTRUE(video_map_cache_ready) || isTRUE(force) || is.null(video_map_wide_cache)) {
+    video_map_wide_cache <<- load_combined_video_map_wide(play_ids = pitch_play_ids)
+    video_map_cache_ready <<- TRUE
+  }
+  video_map_wide_cache
+}
+
+attach_video_clips_lazy <- function(df, force = FALSE) {
+  vm_wide <- ensure_video_map_loaded(force = force)
+  attach_video_clips_from_wide(df, vm_wide)
+}
+
+defer_video_map_load <- isTRUE(school_setting("defer_video_map_load", TRUE))
+video_map_warmup_enabled <- isTRUE(school_setting("video_map_warmup_after_start", TRUE))
+video_map_warmup_delay_ms <- as.integer(school_setting("video_map_warmup_delay_ms", 8000))
+if (!is.finite(video_map_warmup_delay_ms) || video_map_warmup_delay_ms < 0L) {
+  video_map_warmup_delay_ms <- 8000L
+}
+video_map_warmup_started <- FALSE
+video_map_warmup_completed <- FALSE
+
+start_video_map_warmup <- function(delay_ms = video_map_warmup_delay_ms) {
+  if (isTRUE(video_map_warmup_started) || isTRUE(video_map_warmup_completed)) return(invisible(FALSE))
+  if (!isTRUE(defer_video_map_load) || !isTRUE(video_map_warmup_enabled)) return(invisible(FALSE))
+  video_map_warmup_started <<- TRUE
+  wait_secs <- max(0, as.numeric(delay_ms) / 1000)
+  message(sprintf("🎬 Scheduling background video warmup in %.1fs", wait_secs))
+  later::later(function() {
+    t0 <- Sys.time()
+    tryCatch({
+      ensure_video_map_loaded(force = FALSE)
+      elapsed <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
+      video_map_warmup_completed <<- TRUE
+      message(sprintf("🎬 Background video warmup complete (%.2fs)", elapsed))
+    }, error = function(e) {
+      video_map_warmup_started <<- FALSE
+      message("⚠️  Background video warmup failed: ", e$message)
+    })
+  }, delay = wait_secs)
+  invisible(TRUE)
+}
+
+if (defer_video_map_load) {
+  message("🎬 Deferring video map load until first video request/filter")
+  log_startup_timing("Deferred video map merge/attachment")
+} else {
+  pitch_data <- attach_video_clips_lazy(pitch_data, force = TRUE)
+  matched_videos <- sum(nzchar(pitch_data$VideoClip %||% ""))
+  message("✅ Attached videos for ", matched_videos, " pitches from combined maps")
+  if (!matched_videos) {
+    message("⚠️  No video matches found for current pitch_data PlayID values.")
+  }
+  log_startup_timing("Completed video map merge/attachment")
+}
 
 pitch_data <- ensure_pitch_keys(pitch_data)
 log_startup_timing("Computed/validated PitchKey values")
@@ -23952,6 +24008,11 @@ log_startup_timing("Completed UI object construction")
 
 # Server logic
 server <- function(input, output, session) {
+  if (isTRUE(defer_video_map_load) && isTRUE(video_map_warmup_enabled)) {
+    session$onFlushed(function() {
+      start_video_map_warmup(video_map_warmup_delay_ms)
+    }, once = TRUE)
+  }
   
   # Get user email from shinyapps.io authentication
   # In shinyapps.io, session$user contains the authenticated user's email
@@ -24142,6 +24203,17 @@ server <- function(input, output, session) {
     }
     
     ""
+  }
+
+  ensure_videos_attached <- function(df) {
+    if (is.null(df) || !is.data.frame(df)) return(df)
+    tryCatch(
+      attach_video_clips_lazy(df),
+      error = function(e) {
+        message("⚠️  Deferred video attach failed: ", e$message)
+        ensure_video_clip_columns(df)
+      }
+    )
   }
   
   fmt_num <- function(digits = 1, unit = "") {
@@ -25409,6 +25481,7 @@ deg_to_clock <- function(x) {
     }
     
     rows_df <- as.data.frame(rows_df, stringsAsFactors = FALSE)
+    rows_df <- ensure_videos_attached(rows_df)
     if (is.null(rownames(rows_df))) rownames(rows_df) <- as.character(seq_len(nrow(rows_df)))
     n_total <- nrow(rows_df)
     clip1 <- tryCatch(as.character(rows_df$VideoClip),  error = function(e) rep("", n_total))
@@ -25425,6 +25498,7 @@ deg_to_clock <- function(x) {
       tryCatch(as.data.frame(compare_pool, stringsAsFactors = FALSE), error = function(e) NULL)
     } else rows_df
     if (is.null(pool_df)) pool_df <- rows_df[0, , drop = FALSE]
+    pool_df <- ensure_videos_attached(pool_df)
     if (is.null(rownames(pool_df))) rownames(pool_df) <- as.character(seq_len(nrow(pool_df)))
     
     pool_clip1 <- tryCatch(as.character(pool_df$VideoClip),  error = function(e) rep("", nrow(pool_df)))
@@ -29168,6 +29242,7 @@ deg_to_clock <- function(x) {
     
     # With Video filter
     if (!is.null(input$withVideo) && input$withVideo != "All") {
+      df <- ensure_videos_attached(df)
       vid1 <- nzchar(ifelse(is.na(df$VideoClip),  "", df$VideoClip))
       vid2 <- nzchar(ifelse(is.na(df$VideoClip2), "", df$VideoClip2))
       vid3 <- nzchar(ifelse(is.na(df$VideoClip3), "", df$VideoClip3))
@@ -29255,6 +29330,7 @@ deg_to_clock <- function(x) {
     
     # With Video filter (leaderboard)
     if (!is.null(input$withVideo) && input$withVideo != "All") {
+      df <- ensure_videos_attached(df)
       vid1 <- nzchar(ifelse(is.na(df$VideoClip),  "", df$VideoClip))
       vid2 <- nzchar(ifelse(is.na(df$VideoClip2), "", df$VideoClip2))
       vid3 <- nzchar(ifelse(is.na(df$VideoClip3), "", df$VideoClip3))
