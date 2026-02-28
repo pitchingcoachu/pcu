@@ -6,6 +6,8 @@ school_config <- list(
   allowed_pitchers = c(
   "Stoller, Cody",
   "Levine, Will",
+  "Shreve, Ryan",
+  "DeVries, Jadon",
   "Barnes, Jon",
   "Giles, Ken",
   "Dillard, Trey",
