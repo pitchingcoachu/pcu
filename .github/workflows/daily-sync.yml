@@ -62,7 +62,9 @@ jobs:
         PITCH_DATA_DB_URL=${{ secrets.PITCH_DATA_DB_URL }}
         PITCH_DATA_SYNC_AFTER_FTP=1
         PITCH_DATA_SYNC_WORKERS=1
-        TM_SYNC_START_YEAR=2024
+        VIDEO_MAP_DB_TABLE=video_map_pcu
+        VIDEO_MAP_ALLOW_NULL_FALLBACK=false
+        TM_SYNC_START_YEAR=2026
         # Persist shinymanager credentials between deploys
         CREDENTIALS_SQLITE_PATH=/home/shiny/credentials.sqlite
         EOF
