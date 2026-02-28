@@ -10,6 +10,13 @@ pitch_data_parse_bool <- function(x, default = FALSE) {
   tolower(trimws(as.character(x))) %in% c("1", "true", "t", "yes", "y", "on")
 }
 
+pitch_data_normalize_school_code <- function(x) {
+  if (is.null(x) || length(x) == 0L) return("")
+  val <- suppressWarnings(as.character(x[[1]]))
+  if (!length(val) || is.na(val) || !nzchar(trimws(val))) return("")
+  toupper(trimws(val))
+}
+
 pitch_data_default_columns <- function() {
   c(
     "Date", "Pitcher", "Email", "PitcherThrows", "TaggedPitchType",
@@ -17,7 +24,9 @@ pitch_data_default_columns <- function() {
     "SpinEfficiency", "SpinRate", "RelHeight", "RelSide", "Extension",
     "VertApprAngle", "HorzApprAngle", "PlateLocSide", "PlateLocHeight",
     "PitchCall", "KorBB", "Balls", "Strikes", "SessionType", "PlayID",
-    "ExitSpeed", "Angle", "BatterSide", "PlayResult", "TaggedHitType", "OutsOnPlay",
+    "ExitSpeed", "Angle", "Distance", "Direction", "BatterSide", "PlayResult", "TaggedHitType", "OutsOnPlay",
+    "ThrowSpeed", "ExchangeTime", "PopTime", "TimeToBase",
+    "BasePositionX", "BasePositionY", "BasePositionZ", "TargetBase",
     "Batter", "Catcher", "VideoClip", "VideoClip2", "VideoClip3",
     "PitchUID", "PitchID", "PitchGuid", "SourceFile", "PitchKey"
   )
@@ -97,6 +106,16 @@ pitch_data_storage_name_map <- function() {
     PlayID = "playid",
     ExitSpeed = "exitspeed",
     Angle = "angle",
+    Distance = "distance",
+    Direction = "direction",
+    ThrowSpeed = "throwspeed",
+    ExchangeTime = "exchangetime",
+    PopTime = "poptime",
+    TimeToBase = "timetobase",
+    BasePositionX = "basepositionx",
+    BasePositionY = "basepositiony",
+    BasePositionZ = "basepositionz",
+    TargetBase = "targetbase",
     BatterSide = "batterside",
     PlayResult = "playresult",
     TaggedHitType = "taggedhittype",
@@ -310,9 +329,19 @@ pitch_data_cache_file <- function(school_code = "") {
   dir <- path.expand(dir)
   dir.create(dir, recursive = TRUE, showWarnings = FALSE)
 
+  # Bump whenever the expected column shape changes.
+  cache_shape_version <- "2026-02-26-spray-catch"
   cfg <- pitch_data_backend_config()
   fingerprint <- if (identical(cfg$type, "postgres")) {
-    paste(cfg$config$host, cfg$config$dbname, Sys.getenv("PITCH_DATA_DB_SCHEMA", "public"), Sys.getenv("PITCH_DATA_DB_TABLE", "pitch_events"), school_code, sep = "|")
+    paste(
+      cache_shape_version,
+      cfg$config$host,
+      cfg$config$dbname,
+      Sys.getenv("PITCH_DATA_DB_SCHEMA", "public"),
+      Sys.getenv("PITCH_DATA_DB_TABLE", "pitch_events"),
+      school_code,
+      sep = "|"
+    )
   } else {
     paste("csv", school_code, sep = "|")
   }
@@ -340,14 +369,45 @@ pitch_data_db_get_query <- function(con, sql) {
     error = function(e1) {
       msg <- conditionMessage(e1)
       recoverable <- grepl(
-        "unnamed prepared statement does not exist|query needs to be bound before fetching",
+        paste(
+          "unnamed prepared statement does not exist",
+          "query needs to be bound before fetching",
+          "bind message supplies [0-9]+ parameters, but prepared statement .* requires [0-9]+",
+          sep = "|"
+        ),
         msg,
         ignore.case = TRUE
       )
       if (!recoverable) stop(e1)
-      res <- DBI::dbSendQuery(con, sql)
-      on.exit(tryCatch(DBI::dbClearResult(res), error = function(...) NULL), add = TRUE)
-      DBI::dbFetch(res)
+      tryCatch(
+        DBI::dbGetQuery(con, sql, immediate = TRUE),
+        error = function(e2) {
+          res <- DBI::dbSendQuery(con, sql, immediate = TRUE)
+          on.exit(tryCatch(DBI::dbClearResult(res), error = function(...) NULL), add = TRUE)
+          DBI::dbFetch(res)
+        }
+      )
+    }
+  )
+}
+
+pitch_data_db_execute <- function(con, sql) {
+  tryCatch(
+    DBI::dbExecute(con, sql),
+    error = function(e1) {
+      msg <- conditionMessage(e1)
+      recoverable <- grepl(
+        paste(
+          "unnamed prepared statement does not exist",
+          "query needs to be bound before fetching",
+          "bind message supplies [0-9]+ parameters, but prepared statement .* requires [0-9]+",
+          sep = "|"
+        ),
+        msg,
+        ignore.case = TRUE
+      )
+      if (!recoverable) stop(e1)
+      DBI::dbExecute(con, sql, immediate = TRUE)
     }
   )
 }
@@ -389,6 +449,7 @@ pitch_data_save_cache <- function(path, obj) {
 }
 
 pitch_data_build_select_sql <- function(con, cols_present, school_code, start_date = NULL, end_date = NULL, chunk_size = 100000L, key_state = NULL) {
+  school_code <- pitch_data_normalize_school_code(school_code)
   all_cols <- pitch_data_default_columns()
   name_map <- pitch_data_storage_name_map()
   if (!length(cols_present)) cols_present <- character(0)
@@ -591,6 +652,7 @@ pitch_data_monthly_ranges <- function(con, school_code = "") {
 }
 
 load_pitch_data_from_postgres <- function(school_code = "", startup_logger = NULL) {
+  school_code <- pitch_data_normalize_school_code(school_code)
   cfg_raw <- pitch_data_backend_config()
   if (!identical(cfg_raw$type, "postgres")) return(NULL)
 
@@ -610,8 +672,19 @@ load_pitch_data_from_postgres <- function(school_code = "", startup_logger = NUL
   ttl <- pitch_data_cache_ttl()
   cached <- pitch_data_load_cached(cache_file, ttl)
   if (!is.null(cached) && is.list(cached) && !is.null(cached$data)) {
-    pitch_data_logger(startup_logger, sprintf("Loaded pitch_data from cache (%d rows)", nrow(cached$data)))
-    return(cached)
+    required_cols <- c("Distance", "Direction", "ThrowSpeed", "ExchangeTime", "PopTime")
+    min_cache_rows <- suppressWarnings(as.integer(Sys.getenv("PITCH_DATA_CACHE_MIN_ROWS", "100")))
+    if (is.na(min_cache_rows) || min_cache_rows < 0L) min_cache_rows <- 0L
+    cache_rows <- nrow(cached$data)
+    if (all(required_cols %in% names(cached$data)) && cache_rows >= min_cache_rows) {
+      pitch_data_logger(startup_logger, sprintf("Loaded pitch_data from cache (%d rows)", nrow(cached$data)))
+      return(cached)
+    }
+    if (!all(required_cols %in% names(cached$data))) {
+      pitch_data_logger(startup_logger, "Ignoring stale cache snapshot missing required spray/catching columns")
+    } else {
+      pitch_data_logger(startup_logger, sprintf("Ignoring undersized cache snapshot (%d rows < min %d); loading from Neon", cache_rows, min_cache_rows))
+    }
   }
 
   con <- do.call(DBI::dbConnect, c(list(RPostgres::Postgres()), cfg))
@@ -660,6 +733,7 @@ load_pitch_data_from_postgres <- function(school_code = "", startup_logger = NUL
 }
 
 load_pitch_data_with_backend <- function(local_data_dir = file.path(getwd(), "data"), school_code = "", startup_logger = NULL) {
+  school_code <- pitch_data_normalize_school_code(school_code)
   cfg <- pitch_data_backend_config()
   if (!identical(cfg$type, "postgres")) return(NULL)
   max_attempts <- suppressWarnings(as.integer(Sys.getenv("PITCH_DATA_DB_RETRIES", "3")))
@@ -710,7 +784,7 @@ ensure_pitch_data_schema <- function(con = NULL, schema_sql_path = file.path("db
   chunks <- trimws(chunks)
   chunks <- chunks[nzchar(chunks)]
   for (stmt in chunks) {
-    DBI::dbExecute(con, stmt)
+    pitch_data_db_execute(con, stmt)
   }
 
   invisible(TRUE)
@@ -737,7 +811,7 @@ ensure_pitch_key_unique_guard <- function(con, school_code = "") {
   )
 
   tryCatch({
-    DBI::dbExecute(con, sql)
+    pitch_data_db_execute(con, sql)
     TRUE
   }, error = function(e) {
     message("Unable to ensure pitch-key unique guard for ", school_code, ": ", e$message)
@@ -748,6 +822,7 @@ ensure_pitch_key_unique_guard <- function(con, school_code = "") {
 sync_csv_file_to_neon <- function(con, csv_path, school_code = "") {
   school_code <- toupper(trimws(as.character(school_code)))
   if (!nzchar(school_code)) school_code <- toupper(trimws(Sys.getenv("TEAM_CODE", "OSU")))
+  force_resync <- pitch_data_parse_bool(Sys.getenv("PITCH_DATA_FORCE_RESYNC", "0"), default = FALSE)
 
   schema <- gsub("[^A-Za-z0-9_]", "_", Sys.getenv("PITCH_DATA_DB_SCHEMA", "public"))
   mtbl <- DBI::Id(schema = schema, table = "pitch_data_files")
@@ -765,7 +840,7 @@ sync_csv_file_to_neon <- function(con, csv_path, school_code = "") {
     as.character(DBI::dbQuoteLiteral(con, source_file))
   )
   existing <- tryCatch(pitch_data_db_get_query(con, existing_sql), error = function(e) data.frame())
-  if (nrow(existing) == 1L) {
+  if (!isTRUE(force_resync) && nrow(existing) == 1L) {
     file_id_existing <- suppressWarnings(as.integer(existing$file_id[[1]]))
     expected_rows <- suppressWarnings(as.integer(existing$row_count[[1]]))
     remote_mtime <- suppressWarnings(as.numeric(existing$file_mtime_epoch[[1]]))
@@ -787,7 +862,7 @@ sync_csv_file_to_neon <- function(con, csv_path, school_code = "") {
   }
 
   checksum <- digest::digest(file = csv_path, algo = "xxhash64")
-  if (nrow(existing) == 1L) {
+  if (!isTRUE(force_resync) && nrow(existing) == 1L) {
     same_checksum <- !is.na(existing$file_checksum[[1]]) &&
       identical(as.character(existing$file_checksum[[1]]), as.character(checksum))
     if (same_checksum) {
@@ -860,9 +935,24 @@ sync_csv_file_to_neon <- function(con, csv_path, school_code = "") {
     df$SessionType <- session_type
   }
 
-  parsed_date <- suppressWarnings(as.Date(df$Date, format = "%Y-%m-%d"))
-  fallback_date <- suppressWarnings(as.Date(df$Date, format = "%m/%d/%Y"))
-  parsed_date[is.na(parsed_date)] <- fallback_date[is.na(parsed_date)]
+  date_values <- trimws(as.character(df$Date))
+  parsed_date <- rep(as.Date(NA), length(date_values))
+
+  # Handle YY-MM-DD first; otherwise %Y-%m-%d will parse "25-10-26" as year 0025.
+  is_two_digit_year <- grepl("^\\d{2}-\\d{2}-\\d{2}$", date_values)
+  if (any(is_two_digit_year)) {
+    parsed_date[is_two_digit_year] <- suppressWarnings(as.Date(date_values[is_two_digit_year], format = "%y-%m-%d"))
+  }
+
+  is_two_digit_slash_year <- grepl("^[0-9]{1,2}/[0-9]{1,2}/[0-9]{2}$", date_values)
+  if (any(is_two_digit_slash_year)) {
+    parsed_date[is_two_digit_slash_year] <- suppressWarnings(as.Date(date_values[is_two_digit_slash_year], format = "%m/%d/%y"))
+  }
+
+  still_na <- is.na(parsed_date)
+  parsed_date[still_na] <- suppressWarnings(as.Date(date_values[still_na], format = "%Y-%m-%d"))
+  still_na <- is.na(parsed_date)
+  parsed_date[still_na] <- suppressWarnings(as.Date(date_values[still_na], format = "%m/%d/%Y"))
 
   if (all(is.na(parsed_date))) {
     m <- stringr::str_match(csv_path, "(20\\d{2})_(0[1-9]|1[0-2])_(0[1-9]|[12]\\d|3[01])")
@@ -871,7 +961,7 @@ sync_csv_file_to_neon <- function(con, csv_path, school_code = "") {
   }
 
   # File manifest row.
-  DBI::dbExecute(con, sprintf(
+  pitch_data_db_execute(con, sprintf(
     "INSERT INTO %s.schools (school_code) VALUES (%s) ON CONFLICT (school_code) DO NOTHING",
     Sys.getenv("PITCH_DATA_DB_SCHEMA", "public"),
     as.character(DBI::dbQuoteLiteral(con, school_code))
@@ -892,7 +982,7 @@ sync_csv_file_to_neon <- function(con, csv_path, school_code = "") {
     local_mtime,
     nrow(df)
   )
-  DBI::dbExecute(con, up_sql)
+  pitch_data_db_execute(con, up_sql)
 
   file_id_sql <- sprintf(
     "SELECT file_id FROM %s WHERE school_code = %s AND source_file = %s",
@@ -900,7 +990,14 @@ sync_csv_file_to_neon <- function(con, csv_path, school_code = "") {
     as.character(DBI::dbQuoteLiteral(con, school_code)),
     as.character(DBI::dbQuoteLiteral(con, source_file))
   )
-  file_id <- pitch_data_db_get_query(con, file_id_sql)$file_id[[1]]
+  file_id_df <- tryCatch(pitch_data_db_get_query(con, file_id_sql), error = function(e) data.frame())
+  if (!nrow(file_id_df) || !"file_id" %in% names(file_id_df)) {
+    file_id_df <- tryCatch(DBI::dbGetQuery(con, file_id_sql, immediate = TRUE), error = function(e) data.frame())
+  }
+  if (!nrow(file_id_df) || !"file_id" %in% names(file_id_df)) {
+    stop("Failed to resolve file_id for source_file: ", source_file)
+  }
+  file_id <- file_id_df$file_id[[1]]
 
   # Replace current rows for this file then bulk-insert refreshed rows.
   del_sql <- sprintf(
@@ -909,7 +1006,7 @@ sync_csv_file_to_neon <- function(con, csv_path, school_code = "") {
     as.character(DBI::dbQuoteLiteral(con, school_code)),
     as.integer(file_id)
   )
-  DBI::dbExecute(con, del_sql)
+  pitch_data_db_execute(con, del_sql)
 
   pitch_key_existing <- if ("PitchKey" %in% names(df)) as.character(df$PitchKey) else rep("", nrow(df))
   pitch_key_existing[is.na(pitch_key_existing)] <- ""
@@ -920,7 +1017,7 @@ sync_csv_file_to_neon <- function(con, csv_path, school_code = "") {
 
   df$school_code <- school_code
   df$file_id <- as.integer(file_id)
-  df$session_date <- as.character(parsed_date)
+  df$session_date <- parsed_date
   df$session_type <- as.character(df$SessionType)
   df$pitch_key <- as.character(pitch_key_existing)
   df$source_file <- source_file
@@ -929,7 +1026,7 @@ sync_csv_file_to_neon <- function(con, csv_path, school_code = "") {
   db_df <- data.frame(
     school_code = as.character(df$school_code),
     file_id = as.integer(df$file_id),
-    session_date = as.character(df$session_date),
+    session_date = as.Date(df$session_date),
     session_type = as.character(df$session_type),
     source_file = as.character(df$source_file),
     pitch_key = as.character(df$pitch_key),
@@ -943,34 +1040,93 @@ sync_csv_file_to_neon <- function(con, csv_path, school_code = "") {
     db_df[[db_nm]] <- if (nm %in% names(df)) as.character(df[[nm]]) else NA_character_
   }
 
-  tmp_tbl <- paste0("pitch_events_stage_", as.integer(Sys.time()), "_", sample.int(1e6, 1))
-  on.exit(tryCatch(DBI::dbRemoveTable(con, DBI::Id(table = tmp_tbl)), error = function(...) NULL), add = TRUE)
-  DBI::dbWriteTable(con, DBI::Id(table = tmp_tbl), db_df, temporary = TRUE, overwrite = TRUE, row.names = FALSE)
+  # Pooler-safe path: avoid temp tables; pre-filter duplicate pitch_key rows, then append.
+  if (nrow(db_df) && "pitch_key" %in% names(db_df)) {
+    has_pk <- nzchar(db_df$pitch_key)
+    if (any(has_pk)) {
+      db_df <- db_df[(!has_pk) | (!duplicated(db_df$pitch_key)), , drop = FALSE]
 
-  col_names <- names(db_df)
-  cols_sql <- paste(vapply(col_names, function(nm) as.character(DBI::dbQuoteIdentifier(con, nm)), character(1)), collapse = ", ")
-  insert_sql <- sprintf(
-    "INSERT INTO %s (%s)
-     SELECT %s FROM %s
-     ON CONFLICT DO NOTHING",
-    as.character(DBI::dbQuoteIdentifier(con, etbl)),
-    cols_sql,
-    cols_sql,
-    as.character(DBI::dbQuoteIdentifier(con, DBI::Id(table = tmp_tbl)))
-  )
-  DBI::dbExecute(con, insert_sql)
+      unique_keys <- unique(db_df$pitch_key[nzchar(db_df$pitch_key)])
+      if (length(unique_keys)) {
+        existing_keys <- character(0)
+        chunk_size <- 1000L
+        for (i in seq(1L, length(unique_keys), by = chunk_size)) {
+          key_chunk <- unique_keys[i:min(i + chunk_size - 1L, length(unique_keys))]
+          in_sql <- paste(vapply(key_chunk, function(k) as.character(DBI::dbQuoteLiteral(con, k)), character(1)), collapse = ", ")
+          key_sql <- sprintf(
+            "SELECT pitch_key FROM %s WHERE school_code = %s AND pitch_key IN (%s)",
+            as.character(DBI::dbQuoteIdentifier(con, etbl)),
+            as.character(DBI::dbQuoteLiteral(con, school_code)),
+            in_sql
+          )
+          key_rows <- tryCatch(pitch_data_db_get_query(con, key_sql), error = function(e) data.frame())
+          if (nrow(key_rows) && "pitch_key" %in% names(key_rows)) {
+            existing_keys <- c(existing_keys, as.character(key_rows$pitch_key))
+          }
+        }
+        if (length(existing_keys)) {
+          keep <- !nzchar(db_df$pitch_key) | !(db_df$pitch_key %in% unique(existing_keys))
+          db_df <- db_df[keep, , drop = FALSE]
+        }
+      }
+    }
+  }
+
+  if (nrow(db_df)) {
+    tryCatch(
+      DBI::dbAppendTable(con, etbl, db_df),
+      error = function(e) {
+        msg <- conditionMessage(e)
+        if (!grepl("duplicate key value violates unique constraint", msg, ignore.case = TRUE)) {
+          stop(e)
+        }
+        col_names <- names(db_df)
+        cols_sql <- paste(vapply(col_names, function(nm) as.character(DBI::dbQuoteIdentifier(con, nm)), character(1)), collapse = ", ")
+        tbl_sql <- as.character(DBI::dbQuoteIdentifier(con, etbl))
+        for (i in seq_len(nrow(db_df))) {
+          vals_sql <- vapply(col_names, function(nm) {
+            v <- db_df[[nm]][i]
+            if (is.na(v)) {
+              "NULL"
+            } else {
+              as.character(DBI::dbQuoteLiteral(con, as.character(v)))
+            }
+          }, character(1))
+          row_sql <- sprintf(
+            "INSERT INTO %s (%s) VALUES (%s) ON CONFLICT DO NOTHING",
+            tbl_sql, cols_sql, paste(vals_sql, collapse = ", ")
+          )
+          pitch_data_db_execute(con, row_sql)
+        }
+        invisible(NULL)
+      }
+    )
+  }
   invisible(nrow(db_df))
 }
 
-sync_csv_tree_to_neon <- function(data_dir = file.path("data"), school_code = "", workers = 2L) {
+sync_csv_tree_to_neon <- function(data_dir = file.path("data"), school_code = "", workers = 2L, csv_paths = NULL) {
   con <- pitch_data_db_connect()
   on.exit(tryCatch(DBI::dbDisconnect(con), error = function(...) NULL), add = TRUE)
 
-  ensure_pitch_data_schema(con)
-  ensure_pitch_key_unique_guard(con, school_code = school_code)
+  tryCatch(
+    ensure_pitch_data_schema(con),
+    error = function(e) message("Schema ensure skipped: ", e$message)
+  )
+  tryCatch(
+    ensure_pitch_key_unique_guard(con, school_code = school_code),
+    error = function(e) message("Pitch-key unique guard ensure skipped: ", e$message)
+  )
 
-  csvs <- list.files(data_dir, pattern = "\\.csv$", recursive = TRUE, full.names = TRUE)
+  if (is.null(csv_paths)) {
+    csvs <- list.files(data_dir, pattern = "\\.csv$", recursive = TRUE, full.names = TRUE)
+  } else {
+    csvs <- as.character(csv_paths)
+  }
+  csvs <- csvs[file.exists(csvs)]
+  csvs <- csvs[grepl("\\.csv$", csvs, ignore.case = TRUE)]
   csvs <- csvs[grepl("([/\\\\]practice[/\\\\])|([/\\\\]v3[/\\\\])", tolower(csvs))]
+  csvs <- unique(normalizePath(csvs, winslash = "/", mustWork = FALSE))
   if (!length(csvs)) {
     message("No pitch CSV files found under ", data_dir)
     return(invisible(0L))
@@ -1045,13 +1201,12 @@ sync_csv_tree_to_neon <- function(data_dir = file.path("data"), school_code = ""
   # Use per-file transaction for resilience and parallel workers where available.
   do_one <- function(p) {
     tryCatch({
-      DBI::dbBegin(con)
-      n <- sync_csv_file_to_neon(con, p, school_code = school_code_norm)
+      file_con <- pitch_data_db_connect()
+      on.exit(tryCatch(DBI::dbDisconnect(file_con), error = function(...) NULL), add = TRUE)
+      n <- sync_csv_file_to_neon(file_con, p, school_code = school_code_norm)
       skipped <- isTRUE(attr(n, "skipped"))
-      DBI::dbCommit(con)
       list(path = p, rows = n, ok = TRUE, skipped = skipped, err = "")
     }, error = function(e) {
-      tryCatch(DBI::dbRollback(con), error = function(...) NULL)
       list(path = p, rows = 0L, ok = FALSE, skipped = FALSE, err = e$message)
     })
   }
