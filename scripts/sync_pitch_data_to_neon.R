@@ -15,7 +15,7 @@ args <- commandArgs(trailingOnly = TRUE)
 root_data_dir <- if (length(args) >= 1 && nzchar(args[[1]])) args[[1]] else file.path("data")
 workers <- if (length(args) >= 2) suppressWarnings(as.integer(args[[2]])) else suppressWarnings(as.integer(Sys.getenv("PITCH_DATA_SYNC_WORKERS", "2")))
 if (is.na(workers) || workers < 1L) workers <- 2L
-team_code_default <- "OSU"
+team_code_default <- "PCU"
 if (file.exists(file.path("config", "school_config.R"))) {
   try(source(file.path("config", "school_config.R")), silent = TRUE)
   if (exists("school_config") && is.list(school_config) &&
