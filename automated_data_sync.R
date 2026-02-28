@@ -114,6 +114,7 @@ sync_practice_data <- function() {
   cat("Syncing practice data...\n")
   years <- recent_sync_years()
   downloaded_count <- 0
+  downloaded_paths <- character(0)
   
   for (yr in years) {
     practice_base_path <- paste0("/practice/", yr, "/")
@@ -143,6 +144,7 @@ sync_practice_data <- function() {
           
           if (download_csv(remote_path, local_path)) {
             downloaded_count <- downloaded_count + 1
+            downloaded_paths <- c(downloaded_paths, local_path)
           }
           
           if (FTP_THROTTLE_SEC > 0) Sys.sleep(FTP_THROTTLE_SEC)
@@ -152,7 +154,7 @@ sync_practice_data <- function() {
   }
   
   cat("Practice sync complete:", downloaded_count, "files downloaded\n")
-  return(downloaded_count > 0)
+  unique(downloaded_paths)
 }
 
 # Function to check if file date is in allowed ranges
@@ -168,7 +170,7 @@ is_date_in_range <- function(file_path) {
   file_date <- as.Date(paste(date_match[2], date_match[3], date_match[4], sep = "-"))
   
   # Include all data from configured sync start year onward.
-  start_date <- as.Date(sprintf("%04d-01-01", SYNC_START_YEAR))
+  start_date <- as.Date(sprintf("2026-02-13", SYNC_START_YEAR))
   return(file_date >= start_date)
 }
 
@@ -177,6 +179,7 @@ sync_v3_data <- function() {
   cat("Syncing v3 data with date filtering...\n")
   years <- recent_sync_years()
   downloaded_count <- 0
+  downloaded_paths <- character(0)
   seen_v3_files <- character(0)
   
   for (yr in years) {
@@ -227,6 +230,7 @@ sync_v3_data <- function() {
             
             if (download_csv(remote_path, local_path)) {
               downloaded_count <- downloaded_count + 1
+              downloaded_paths <- c(downloaded_paths, local_path)
             }
             
             if (FTP_THROTTLE_SEC > 0) Sys.sleep(FTP_THROTTLE_SEC)
@@ -251,6 +255,7 @@ sync_v3_data <- function() {
             
             if (download_csv(remote_path, local_path)) {
               downloaded_count <- downloaded_count + 1
+              downloaded_paths <- c(downloaded_paths, local_path)
             }
             
             if (FTP_THROTTLE_SEC > 0) Sys.sleep(FTP_THROTTLE_SEC)
@@ -261,7 +266,7 @@ sync_v3_data <- function() {
   }
   
   cat("V3 sync complete:", downloaded_count, "files downloaded\n")
-  return(downloaded_count > 0)
+  unique(downloaded_paths)
 }
 
 # Function to remove duplicate data across all CSV files
@@ -491,8 +496,10 @@ main_sync <- function() {
   }
   
   # Sync both data sources
-  practice_updated <- sync_practice_data()
-  v3_updated <- sync_v3_data()
+  practice_downloaded <- sync_practice_data()
+  v3_downloaded <- sync_v3_data()
+  practice_updated <- length(practice_downloaded) > 0
+  v3_updated <- length(v3_downloaded) > 0
   
   end_time <- Sys.time()
   duration <- difftime(end_time, start_time, units = "mins")
@@ -576,10 +583,20 @@ main_sync <- function() {
       workers <- suppressWarnings(as.integer(Sys.getenv("PITCH_DATA_SYNC_WORKERS", "2")))
       if (is.na(workers) || workers < 1L) workers <- 2L
       tryCatch({
+        incremental_only <- tryCatch(
+          if (exists("pitch_data_parse_bool", mode = "function")) {
+            pitch_data_parse_bool(Sys.getenv("PITCH_DATA_SYNC_ONLY_DOWNLOADED", "1"), default = TRUE)
+          } else {
+            tolower(trimws(Sys.getenv("PITCH_DATA_SYNC_ONLY_DOWNLOADED", "1"))) %in% c("1", "true", "yes", "y")
+          },
+          error = function(e) TRUE
+        )
+        changed_csvs <- unique(c(practice_downloaded, v3_downloaded))
         sync_csv_tree_to_neon(
           data_dir = LOCAL_DATA_DIR,
           school_code = Sys.getenv("TEAM_CODE", "OSU"),
-          workers = workers
+          workers = workers,
+          csv_paths = if (incremental_only) changed_csvs else NULL
         )
         pitch_neon_updated <- TRUE
         cat("Synced local pitch CSVs into Neon pitch_events\n")
