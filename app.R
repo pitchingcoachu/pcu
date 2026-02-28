@@ -21609,10 +21609,7 @@ biomech_server <- function(input, output, session, app_id_fn) {
       }
     }
     data <- data %>%
-      mutate(
-        date_obj = suppressWarnings(as.Date(Date, format = "%m/%d/%Y")),
-        date_obj = dplyr::coalesce(date_obj, suppressWarnings(as.Date(Date)))
-      )
+      mutate(date_obj = parse_date_flex(Date))
     if (is.finite(as.numeric(range_start)) && is.finite(as.numeric(range_end))) {
       data <- data %>%
         filter(date_obj >= range_start, date_obj <= range_end)
