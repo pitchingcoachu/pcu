@@ -114,8 +114,14 @@ order_session_rows <- function(df) {
 VIDEO_MAP_TABLE_COLUMNS <- c(
   "session_id", "play_id", "camera_slot", "camera_name", "camera_target",
   "video_type", "azure_blob", "azure_md5", "cloudinary_url", "cloudinary_public_id",
-  "uploaded_at"
+  "uploaded_at", "school_code"
 )
+
+video_map_school_code <- function() {
+  code <- toupper(trimws(Sys.getenv("TEAM_CODE", "OSU")))
+  if (!nzchar(code)) code <- "OSU"
+  code
+}
 
 parse_video_map_postgres_uri <- function(uri) {
   if (!nzchar(uri)) return(NULL)
@@ -326,27 +332,100 @@ video_map_ensure_table <- function(con, table) {
       cloudinary_url TEXT,
       cloudinary_public_id TEXT,
       uploaded_at TIMESTAMPTZ,
+      school_code TEXT,
       PRIMARY KEY (session_id, camera_slot, play_id)
     )
   "))
+  cols <- tryCatch(DBI::dbListFields(con, table), error = function(e) character(0))
+  cols <- tolower(as.character(cols))
+  if (!"school_code" %in% cols) {
+    video_map_db_execute(con, sprintf(
+      "ALTER TABLE %s ADD COLUMN school_code TEXT",
+      as.character(tbl_id)
+    ))
+  }
+  video_map_db_execute(con, sprintf(
+    "CREATE INDEX IF NOT EXISTS %s ON %s (school_code, play_id, camera_slot)",
+    as.character(DBI::dbQuoteIdentifier(con, paste0(table, "_school_play_idx"))),
+    as.character(tbl_id)
+  ))
   TRUE
 }
 
-video_map_read_all_neon <- function() {
+video_map_read_all_neon <- function(play_ids = NULL, school_code = video_map_school_code()) {
   con <- video_map_db_connect()
   if (is.null(con)) return(tibble::tibble())
   on.exit(DBI::dbDisconnect(con), add = TRUE)
   tbl <- video_map_table_name()
   if (!DBI::dbExistsTable(con, tbl)) return(tibble::tibble())
-  df <- DBI::dbReadTable(con, tbl)
+  video_map_ensure_table(con, tbl)
+  school_code <- toupper(trimws(as.character(school_code %||% "")))
+  allow_null_fallback <- tolower(trimws(Sys.getenv("VIDEO_MAP_ALLOW_NULL_FALLBACK", "true"))) %in% c("1", "true", "yes", "y")
+  school_pred <- if (nzchar(school_code)) {
+    if (allow_null_fallback) {
+      sprintf(
+        "(school_code = %s OR school_code IS NULL OR btrim(school_code) = '')",
+        as.character(DBI::dbQuoteString(con, school_code))
+      )
+    } else {
+      sprintf("school_code = %s", as.character(DBI::dbQuoteString(con, school_code)))
+    }
+  } else {
+    "TRUE"
+  }
+  if (!is.null(play_ids)) {
+    play_ids <- tolower(trimws(as.character(play_ids)))
+    play_ids <- unique(play_ids[nzchar(play_ids)])
+    if (!length(play_ids)) return(tibble::tibble())
+    out <- list()
+    chunk_size <- 1000L
+    for (i in seq(1L, length(play_ids), by = chunk_size)) {
+      chunk <- play_ids[i:min(i + chunk_size - 1L, length(play_ids))]
+      in_sql <- paste(vapply(chunk, function(x) as.character(DBI::dbQuoteString(con, x)), character(1)), collapse = ", ")
+      sql <- sprintf(
+        "SELECT DISTINCT ON (lower(play_id), camera_slot)
+            %s
+         FROM %s
+         WHERE lower(play_id) IN (%s) AND %s
+         ORDER BY lower(play_id), camera_slot,
+           CASE WHEN upper(coalesce(school_code,'')) = %s THEN 0 ELSE 1 END,
+           uploaded_at DESC NULLS LAST",
+        paste(VIDEO_MAP_TABLE_COLUMNS, collapse = ", "),
+        as.character(DBI::dbQuoteIdentifier(con, tbl)),
+        in_sql,
+        school_pred,
+        as.character(DBI::dbQuoteString(con, school_code))
+      )
+      out[[length(out) + 1L]] <- tryCatch(video_map_db_get_query(con, sql), error = function(e) tibble::tibble())
+    }
+    df <- dplyr::bind_rows(out)
+  } else {
+    sql <- sprintf(
+      "SELECT %s FROM %s WHERE %s",
+      paste(VIDEO_MAP_TABLE_COLUMNS, collapse = ", "),
+      as.character(DBI::dbQuoteIdentifier(con, tbl)),
+      school_pred
+    )
+    df <- tryCatch(video_map_db_get_query(con, sql), error = function(e) tibble::tibble())
+  }
   df["uploaded_at"] <- lapply(df["uploaded_at"], as.character)
   df
 }
 
 normalize_video_map_df <- function(df) {
-  if (!nrow(df)) return(df)
+  if (!is.data.frame(df)) return(tibble::tibble())
+  for (nm in VIDEO_MAP_TABLE_COLUMNS) {
+    if (!nm %in% names(df)) df[[nm]] <- NA_character_
+  }
+  if (!nrow(df)) return(df %>% dplyr::select(all_of(VIDEO_MAP_TABLE_COLUMNS)))
   df <- df %>% dplyr::select(all_of(VIDEO_MAP_TABLE_COLUMNS))
   df[] <- lapply(df, as.character)
+  code <- video_map_school_code()
+  df$school_code <- ifelse(
+    is.na(df$school_code) | !nzchar(trimws(df$school_code)),
+    code,
+    toupper(trimws(df$school_code))
+  )
   df
 }
 
@@ -500,7 +579,7 @@ video_map_write_rows_to_neon <- function(rows) {
   tbl_id <- DBI::dbQuoteIdentifier(con, tbl)
   sql <- glue("
     INSERT INTO {tbl_id}
-    (session_id, play_id, camera_slot, camera_name, camera_target, video_type, azure_blob, azure_md5, cloudinary_url, cloudinary_public_id, uploaded_at)
+    (session_id, play_id, camera_slot, camera_name, camera_target, video_type, azure_blob, azure_md5, cloudinary_url, cloudinary_public_id, uploaded_at, school_code)
     SELECT DISTINCT ON (session_id, camera_slot, play_id)
       session_id,
       play_id,
@@ -512,7 +591,8 @@ video_map_write_rows_to_neon <- function(rows) {
       azure_md5,
       cloudinary_url,
       cloudinary_public_id,
-      NULLIF(uploaded_at, '')::timestamptz
+      NULLIF(uploaded_at, '')::timestamptz,
+      upper(coalesce(NULLIF(school_code, ''), '{video_map_school_code()}'))
     FROM {tmp_id}
     ORDER BY
       session_id,
@@ -528,7 +608,8 @@ video_map_write_rows_to_neon <- function(rows) {
       azure_md5 = EXCLUDED.azure_md5,
       cloudinary_url = EXCLUDED.cloudinary_url,
       cloudinary_public_id = EXCLUDED.cloudinary_public_id,
-      uploaded_at = EXCLUDED.uploaded_at
+      uploaded_at = EXCLUDED.uploaded_at,
+      school_code = EXCLUDED.school_code
   ")
   video_map_db_execute(con, sql)
   TRUE
@@ -586,9 +667,23 @@ video_map_backfill_local_to_neon <- function(map_path = "data/video_map.csv") {
   on.exit(DBI::dbDisconnect(con), add = TRUE)
   tbl <- video_map_table_name()
   video_map_ensure_table(con, tbl)
+  school_code <- video_map_school_code()
+  allow_null_fallback <- tolower(trimws(Sys.getenv("VIDEO_MAP_ALLOW_NULL_FALLBACK", "true"))) %in% c("1", "true", "yes", "y")
+  school_pred <- if (allow_null_fallback) {
+    sprintf(
+      "(school_code = %s OR school_code IS NULL OR btrim(school_code) = '')",
+      as.character(DBI::dbQuoteString(con, school_code))
+    )
+  } else {
+    sprintf("school_code = %s", as.character(DBI::dbQuoteString(con, school_code)))
+  }
 
   neon_n <- tryCatch(
-    as.integer(video_map_db_get_query(con, sprintf("SELECT COUNT(*) AS n FROM %s", DBI::dbQuoteIdentifier(con, tbl)))$n[[1]]),
+    as.integer(video_map_db_get_query(con, sprintf(
+      "SELECT COUNT(*) AS n FROM %s WHERE %s",
+      DBI::dbQuoteIdentifier(con, tbl),
+      school_pred
+    ))$n[[1]]),
     error = function(e) NA_integer_
   )
   local_n <- nrow(local_df)
