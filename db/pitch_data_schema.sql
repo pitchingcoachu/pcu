@@ -51,6 +51,16 @@ CREATE TABLE IF NOT EXISTS public.pitch_events (
   PlayID text,
   ExitSpeed text,
   Angle text,
+  Distance text,
+  Direction text,
+  ThrowSpeed text,
+  ExchangeTime text,
+  PopTime text,
+  TimeToBase text,
+  BasePositionX text,
+  BasePositionY text,
+  BasePositionZ text,
+  TargetBase text,
   BatterSide text,
   PlayResult text,
   TaggedHitType text,
@@ -96,3 +106,14 @@ CREATE INDEX IF NOT EXISTS idx_pitch_events_date_brin
 CREATE INDEX IF NOT EXISTS idx_pitch_events_video_partial
   ON public.pitch_events (school_code, session_date DESC)
   WHERE (coalesce(VideoClip, '') <> '' OR coalesce(VideoClip2, '') <> '' OR coalesce(VideoClip3, '') <> '');
+
+ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS Distance text;
+ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS Direction text;
+ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS ThrowSpeed text;
+ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS ExchangeTime text;
+ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS PopTime text;
+ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS TimeToBase text;
+ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS BasePositionX text;
+ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS BasePositionY text;
+ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS BasePositionZ text;
+ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS TargetBase text;
