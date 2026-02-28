@@ -17,6 +17,9 @@ suppressPackageStartupMessages({
 deploy_app <- function() {
   tryCatch({
     cat("Starting deployment of Harvard app...\n")
+    if (file.exists(".Renviron")) {
+      readRenviron(".Renviron")
+    }
     
     # Run package installation script
     cat("Running package installation script...\n")
@@ -55,8 +58,12 @@ deploy_app <- function() {
       })
     }
     
-    # Deploy the app with better error handling
+    # Deploy the app with better error handling.
+    # shinyapps.io does not support deployApp(envVars=...).
     cat("Deploying to shinyapps.io...\n")
+    if (!file.exists(".Renviron")) {
+      cat("Warning: .Renviron not found; app may fall back to sqlite state backend in production.\n")
+    }
     deployApp(
       appDir = ".",
       appName = "tmdata",
