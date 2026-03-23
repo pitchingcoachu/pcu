@@ -32,6 +32,7 @@ if (is.na(SYNC_START_YEAR) || SYNC_START_YEAR < 2000) SYNC_START_YEAR <- 2024
 LAST_SYNC_FILE <- file.path(LOCAL_DATA_DIR, "last_sync.txt")
 TM_SYNC_LOOKBACK_DAYS <- suppressWarnings(as.integer(Sys.getenv("TM_SYNC_LOOKBACK_DAYS", "45")))
 if (is.na(TM_SYNC_LOOKBACK_DAYS) || TM_SYNC_LOOKBACK_DAYS < 1L) TM_SYNC_LOOKBACK_DAYS <- 45L
+TM_SYNC_SKIP_V3 <- tolower(trimws(Sys.getenv("TM_SYNC_SKIP_V3", "0"))) %in% c("1", "true", "yes", "y")
 FTP_THROTTLE_SEC <- suppressWarnings(as.numeric(Sys.getenv("TM_FTP_THROTTLE_SEC", "0")))
 if (is.na(FTP_THROTTLE_SEC) || FTP_THROTTLE_SEC < 0) FTP_THROTTLE_SEC <- 0
 
@@ -170,7 +171,7 @@ is_date_in_range <- function(file_path) {
   file_date <- as.Date(paste(date_match[2], date_match[3], date_match[4], sep = "-"))
   
   # Include all data from configured sync start year onward.
-  start_date <- as.Date(sprintf("2026-02-13", SYNC_START_YEAR))
+  start_date <- as.Date(sprintf("%04d-01-01", SYNC_START_YEAR))
   return(file_date >= start_date)
 }
 
@@ -495,9 +496,14 @@ main_sync <- function() {
     cat("Incremental sync - keeping existing files\n")
   }
   
-  # Sync both data sources
+  # Sync practice source always; v3 can be disabled when a school only has practice/bullpen data.
   practice_downloaded <- sync_practice_data()
-  v3_downloaded <- sync_v3_data()
+  v3_downloaded <- if (isTRUE(TM_SYNC_SKIP_V3)) {
+    cat("Skipping v3 sync (TM_SYNC_SKIP_V3=1)\n")
+    character(0)
+  } else {
+    sync_v3_data()
+  }
   practice_updated <- length(practice_downloaded) > 0
   v3_updated <- length(v3_downloaded) > 0
   
@@ -594,7 +600,7 @@ main_sync <- function() {
         changed_csvs <- unique(c(practice_downloaded, v3_downloaded))
         sync_csv_tree_to_neon(
           data_dir = LOCAL_DATA_DIR,
-          school_code = Sys.getenv("TEAM_CODE", "OSU"),
+          school_code = Sys.getenv("TEAM_CODE", "PCU"),
           workers = workers,
           csv_paths = if (incremental_only) changed_csvs else NULL
         )
