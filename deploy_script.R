@@ -21,26 +21,39 @@ deploy_app <- function() {
       readRenviron(".Renviron")
     }
     
-    # Run package installation script
-    cat("Running package installation script...\n")
-    if (file.exists("install_packages.R")) {
-      system2("Rscript", "install_packages.R", stdout = TRUE, stderr = TRUE)
+    # Dependency setup
+    if (file.exists("renv.lock")) {
+      cat("renv.lock found; restoring exact dependencies from lockfile...\n")
+      if (!requireNamespace("renv", quietly = TRUE)) {
+        install.packages("renv", dependencies = TRUE)
+      }
+      renv::consent(provided = TRUE)
+      renv::restore(prompt = FALSE)
+      renv_status <- renv::status()
+      if (!isTRUE(renv_status$synchronized)) {
+        stop("renv lockfile is not synchronized with the project library")
+      }
+      cat("✓ renv dependencies restored and synchronized\n")
     } else {
-      cat("Warning: install_packages.R not found, installing packages manually...\n")
-      
-      # Install required packages if not already installed
-      required_packages <- c(
-        "shiny", "shinyjs", "dplyr", "purrr", "ggplot2", "DT", "gridExtra", 
-        "patchwork", "hexbin", "ggiraph", "httr2", "MASS", "digest",
-        "curl", "readr", "lubridate", "stringr", "akima", "colourpicker",
-        "memoise", "shinymanager", "DBI", "RSQLite",
-        "plotly", "jsonlite"
-      )
-      
-      for (pkg in required_packages) {
-        if (!requireNamespace(pkg, quietly = TRUE)) {
-          cat("Installing package:", pkg, "\n")
-          install.packages(pkg, dependencies = TRUE, quiet = TRUE)
+      cat("No renv.lock found; running package installation fallback...\n")
+      if (file.exists("install_packages.R")) {
+        system2("Rscript", "install_packages.R", stdout = TRUE, stderr = TRUE)
+      } else {
+        cat("Warning: install_packages.R not found, installing packages manually...\n")
+
+        required_packages <- c(
+          "shiny", "shinyjs", "dplyr", "purrr", "ggplot2", "DT", "gridExtra",
+          "patchwork", "hexbin", "ggiraph", "httr2", "MASS", "digest",
+          "curl", "readr", "lubridate", "stringr", "akima", "colourpicker",
+          "memoise", "shinymanager", "DBI", "RSQLite",
+          "plotly", "jsonlite"
+        )
+
+        for (pkg in required_packages) {
+          if (!requireNamespace(pkg, quietly = TRUE)) {
+            cat("Installing package:", pkg, "\n")
+            install.packages(pkg, dependencies = TRUE, quiet = TRUE)
+          }
         }
       }
     }
