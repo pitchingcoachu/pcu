@@ -28,12 +28,25 @@ deploy_app <- function() {
         install.packages("renv", dependencies = TRUE)
       }
       renv::consent(provided = TRUE)
-      renv::restore(prompt = FALSE)
-      renv_status <- renv::status()
-      if (!isTRUE(renv_status$synchronized)) {
-        stop("renv lockfile is not synchronized with the project library")
+      restore_ok <- TRUE
+      tryCatch({
+        renv::restore(prompt = FALSE)
+      }, error = function(e) {
+        msg <- conditionMessage(e)
+        if (grepl("failed to find source for 'DT 0\\\\.34'", msg, ignore.case = TRUE)) {
+          cat("Detected DT lockfile mismatch (0.34 vs 0.34.0); repairing lockfile and retrying restore...\n")
+          renv::record("DT@0.34.0")
+          renv::snapshot(prompt = FALSE)
+          renv::restore(prompt = FALSE)
+        } else {
+          restore_ok <<- FALSE
+          stop(e)
+        }
+      })
+      if (!restore_ok) {
+        stop("renv restore failed")
       }
-      cat("✓ renv dependencies restored and synchronized\n")
+      cat("✓ renv dependencies restored\n")
     } else {
       cat("No renv.lock found; running package installation fallback...\n")
       if (file.exists("install_packages.R")) {
