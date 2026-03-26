@@ -28,24 +28,30 @@ deploy_app <- function() {
         install.packages("renv", dependencies = TRUE)
       }
       renv::consent(provided = TRUE)
-      restore_ok <- TRUE
+      lock_text <- paste(readLines("renv.lock", warn = FALSE), collapse = "\n")
+      if (grepl("\"DT\"\\s*:\\s*\\{[^\\}]*\"Version\"\\s*:\\s*\"0\\.34\"", lock_text, perl = TRUE)) {
+        cat("Normalizing DT version in renv.lock (0.34 -> 0.34.0) before restore...\n")
+        lock_text <- sub(
+          "(\"DT\"\\s*:\\s*\\{[^\\}]*\"Version\"\\s*:\\s*\")0\\.34(\")",
+          "\\10.34.0\\2",
+          lock_text,
+          perl = TRUE
+        )
+        writeLines(lock_text, "renv.lock", useBytes = TRUE)
+      }
       tryCatch({
         renv::restore(prompt = FALSE)
       }, error = function(e) {
         msg <- conditionMessage(e)
-        if (grepl("failed to find source for 'DT 0\\\\.34'", msg, ignore.case = TRUE)) {
-          cat("Detected DT lockfile mismatch (0.34 vs 0.34.0); repairing lockfile and retrying restore...\n")
+        if (grepl("failed to find source for 'DT 0\\.34'", msg, ignore.case = TRUE)) {
+          cat("Detected DT lockfile mismatch during restore; forcing DT@0.34.0 and retrying...\n")
           renv::record("DT@0.34.0")
           renv::snapshot(prompt = FALSE)
           renv::restore(prompt = FALSE)
         } else {
-          restore_ok <<- FALSE
           stop(e)
         }
       })
-      if (!restore_ok) {
-        stop("renv restore failed")
-      }
       cat("✓ renv dependencies restored\n")
     } else {
       cat("No renv.lock found; running package installation fallback...\n")
