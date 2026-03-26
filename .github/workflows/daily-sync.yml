@@ -1,4 +1,4 @@
-name: Daily PCU Data Sync and Deploy
+name: Daily PCU Data Sync
 
 on:
   schedule:
@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  sync-and-deploy:
+  sync-only:
     runs-on: ubuntu-latest
     env:
       R_LIBS_USER: packrat/lib-R
@@ -85,15 +85,6 @@ jobs:
         R_LIBS_USER: packrat/lib-R
       run: Rscript install_packages.R
           
-    - name: Configure rsconnect
-      env:
-        SHINYAPPS_ACCOUNT: ${{ secrets.SHINYAPPS_ACCOUNT }}
-        SHINYAPPS_TOKEN: ${{ secrets.SHINYAPPS_TOKEN }}
-        SHINYAPPS_SECRET: ${{ secrets.SHINYAPPS_SECRET }}
-        R_LIBS_USER: packrat/lib-R
-      run: |
-        Rscript -e "rsconnect::setAccountInfo(name='${{ secrets.SHINYAPPS_ACCOUNT }}', token='${{ secrets.SHINYAPPS_TOKEN }}', secret='${{ secrets.SHINYAPPS_SECRET }}')"
-        
     - name: Sync PCU data
       env:
         R_LIBS_USER: packrat/lib-R
@@ -123,12 +114,6 @@ jobs:
           echo "No data directory or no files found"
         fi
         
-    - name: Deploy to shinyapps.io
-      if: steps.check_data.outputs.data_updated == 'true' || github.event_name == 'workflow_dispatch'
-      env:
-        R_LIBS_USER: packrat/lib-R
-      run: Rscript deploy_script.R
-      
     - name: Skip committing data files
       if: steps.check_data.outputs.data_updated == 'true'
       run: echo "Data files synced to Neon; skipping git commit of local CSVs."

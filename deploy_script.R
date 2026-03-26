@@ -1,22 +1,29 @@
 # deploy_script.R
-# VMI Baseball App Deployment Script
-# Deploys the Shiny app to shinyapps.io
+# PCU data sync/deploy script
+# Default behavior: sync/prepare only (skip shinyapps deployment).
+# To deploy to shinyapps, run with SHINY_DEPLOY=1.
 
 # Set CRAN repository
 options(repos = c(CRAN = "https://cloud.r-project.org/"))
 
-# Load required libraries
+should_deploy_shiny <- function() {
+  tolower(trimws(Sys.getenv("SHINY_DEPLOY", "0"))) %in% c("1", "true", "yes", "y", "on")
+}
+
+# Load deploy-only library only when explicit deploy is requested.
 suppressPackageStartupMessages({
-  if (!requireNamespace("rsconnect", quietly = TRUE)) {
-    install.packages("rsconnect", dependencies = TRUE)
+  if (should_deploy_shiny()) {
+    if (!requireNamespace("rsconnect", quietly = TRUE)) {
+      install.packages("rsconnect", dependencies = TRUE)
+    }
+    library(rsconnect)
   }
-  library(rsconnect)
 })
 
 # Deploy to shinyapps.io
 deploy_app <- function() {
   tryCatch({
-    cat("Starting deployment of Harvard app...\n")
+    cat("Starting PCU pipeline...\n")
     if (file.exists(".Renviron")) {
       readRenviron(".Renviron")
     }
@@ -99,6 +106,12 @@ deploy_app <- function() {
       })
     }
     
+    if (!should_deploy_shiny()) {
+      cat("SHINY_DEPLOY is not enabled. Skipping shinyapps deployment (sync-only mode).\n")
+      cat("✓ Pipeline completed (no shinyapps deploy attempted)\n")
+      return(TRUE)
+    }
+
     # Deploy the app with better error handling.
     # shinyapps.io does not support deployApp(envVars=...).
     cat("Deploying to shinyapps.io...\n")
@@ -155,8 +168,9 @@ deploy_app <- function() {
 
 # Run deployment
 if (!interactive()) {
-  cat("CBU - Deployment Script\n")
+  cat("PCU - Deployment Script\n")
   cat("==========================================\n")
+  cat(sprintf("Mode: %s\n", if (should_deploy_shiny()) "sync + shinyapps deploy" else "sync only (no shinyapps deploy)"))
   success <- deploy_app()
   if (!success) {
     cat("Deployment failed. Exiting with error code 1.\n")
