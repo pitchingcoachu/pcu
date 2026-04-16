@@ -63,7 +63,9 @@ list_ftp_files <- function(ftp_path) {
 download_csv <- function(remote_file, local_file) {
   # Check if this file should be excluded
   filename <- basename(remote_file)
-  if (should_exclude_csv(filename)) {
+  # School repos: only exclude obvious non-pitch payload files by name.
+  if (grepl("fhc|json", filename, ignore.case = TRUE)) {
+    cat("Skipping non-pitch file:", filename, "\n")
     return(FALSE)
   }
   # Skip if file already exists (incremental sync)
@@ -136,8 +138,7 @@ sync_practice_data <- function() {
         files_in_day <- list_ftp_files(day_path)
         csv_files <- files_in_day[grepl("\\.csv$", files_in_day, ignore.case = TRUE)]
         
-        # Filter out files with "playerpositioning" in the name (allow unverified)
-        csv_files <- csv_files[!grepl("playerpositioning", csv_files, ignore.case = TRUE)]
+        # School repos: include all CSVs; downstream logic drops non-school rows and dedupes.
         
         for (file in csv_files) {
           remote_path <- paste0(day_path, file)
@@ -213,8 +214,7 @@ sync_v3_data <- function() {
           csv_files <- list_ftp_files(csv_path)
           csv_files <- csv_files[grepl("\\.csv$", csv_files, ignore.case = TRUE)]
           
-          # Filter out files with "playerpositioning" or "unverified" in v3 folder
-          csv_files <- csv_files[!grepl("playerpositioning", csv_files, ignore.case = TRUE)]
+          # School repos: include all CSVs; downstream logic drops non-school rows and dedupes.
           
           for (file in csv_files) {
             if (!nzchar(file)) next
@@ -239,7 +239,7 @@ sync_v3_data <- function() {
         } else {
           csv_files <- files_in_day[grepl("\\.csv$", files_in_day, ignore.case = TRUE)]
           
-          csv_files <- csv_files[!grepl("playerpositioning|unverified", csv_files, ignore.case = TRUE)]
+          # School repos: include all CSVs; downstream logic drops non-school rows and dedupes.
           
           for (file in csv_files) {
             if (!nzchar(file)) next
