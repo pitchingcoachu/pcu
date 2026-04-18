@@ -126,9 +126,10 @@ school_config <- list(
   "Saucedo, Taylor",
   "Knight, Tyler",
   "Zuber, Tyler",
-  "Quattrocchi, Anthony" 
-    
-  ),
+  "Zuniga, Guillermo",
+  "Quattrocchi, Anthony",
+  "Kaufman, Rylan"
+),
   allowed_hitters = c(
     "Stoller, Cody",
   "Barnes, Jon",
@@ -248,8 +249,10 @@ school_config <- list(
   "Saucedo, Taylor",
   "Knight, Tyler",
   "Zuber, Tyler",
-  "Quattrocchi, Anthony" 
-  ),
+  "Zuniga, Guillermo",
+  "Quattrocchi, Anthony",
+  "Kaufman, Rylan"
+),
   allowed_campers = character(0),
   colors = list(
     primary             = "#000000",   # logo black

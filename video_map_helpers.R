@@ -275,36 +275,32 @@ video_map_db_connect <- function() {
 
 video_map_db_execute <- function(con, sql) {
   tryCatch(
-    DBI::dbExecute(con, sql),
+    DBI::dbExecute(con, sql, immediate = TRUE),
     error = function(e1) {
       msg <- conditionMessage(e1)
       recoverable <- grepl(
-        "unnamed prepared statement does not exist|query needs to be bound before fetching",
+        "unnamed prepared statement does not exist|query needs to be bound before fetching|failed to retrieve query result metadata",
         msg,
         ignore.case = TRUE
       )
       if (!recoverable) stop(e1)
-      res <- DBI::dbSendStatement(con, sql)
-      on.exit(tryCatch(DBI::dbClearResult(res), error = function(...) NULL), add = TRUE)
-      DBI::dbGetRowsAffected(res)
+      DBI::dbExecute(con, sql, immediate = TRUE)
     }
   )
 }
 
 video_map_db_get_query <- function(con, sql) {
   tryCatch(
-    DBI::dbGetQuery(con, sql),
+    DBI::dbGetQuery(con, sql, immediate = TRUE),
     error = function(e1) {
       msg <- conditionMessage(e1)
       recoverable <- grepl(
-        "unnamed prepared statement does not exist|query needs to be bound before fetching",
+        "unnamed prepared statement does not exist|query needs to be bound before fetching|failed to retrieve query result metadata",
         msg,
         ignore.case = TRUE
       )
       if (!recoverable) stop(e1)
-      res <- DBI::dbSendQuery(con, sql)
-      on.exit(tryCatch(DBI::dbClearResult(res), error = function(...) NULL), add = TRUE)
-      DBI::dbFetch(res)
+      DBI::dbGetQuery(con, sql, immediate = TRUE)
     }
   )
 }
