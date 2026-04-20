@@ -306,10 +306,20 @@ video_map_db_get_query <- function(con, sql) {
 }
 
 video_map_table_name <- function() {
-  tbl <- Sys.getenv("VIDEO_MAP_DB_TABLE", "video_map")
-  tbl <- gsub("[^A-Za-z0-9_]", "_", tbl, perl = TRUE)
-  if (!nzchar(tbl)) tbl <- "video_map"
-  tbl
+  explicit <- trimws(Sys.getenv("VIDEO_MAP_DB_TABLE", ""))
+  if (nzchar(explicit)) {
+    tbl <- gsub("[^A-Za-z0-9_]", "_", explicit, perl = TRUE)
+    if (!nzchar(tbl)) tbl <- "video_map"
+    return(tbl)
+  }
+  code <- tolower(gsub("[^A-Za-z0-9_]", "", video_map_school_code(), perl = TRUE))
+  if (!nzchar(code)) return("video_map")
+  paste0("video_map_", code)
+}
+
+video_map_table_candidates <- function() {
+  primary <- video_map_table_name()
+  unique(c(primary, "video_map"))
 }
 
 video_map_ensure_table <- function(con, table) {
@@ -352,9 +362,10 @@ video_map_read_all_neon <- function(play_ids = NULL, school_code = video_map_sch
   con <- video_map_db_connect()
   if (is.null(con)) return(tibble::tibble())
   on.exit(DBI::dbDisconnect(con), add = TRUE)
-  tbl <- video_map_table_name()
-  if (!DBI::dbExistsTable(con, tbl)) return(tibble::tibble())
-  video_map_ensure_table(con, tbl)
+  tables <- video_map_table_candidates()
+  existing_tables <- tables[vapply(tables, function(tbl) DBI::dbExistsTable(con, tbl), logical(1))]
+  if (!length(existing_tables)) return(tibble::tibble())
+  for (tbl in existing_tables) video_map_ensure_table(con, tbl)
   school_code <- toupper(trimws(as.character(school_code %||% "")))
   allow_null_fallback <- tolower(trimws(Sys.getenv("VIDEO_MAP_ALLOW_NULL_FALLBACK", "true"))) %in% c("1", "true", "yes", "y")
   school_pred <- if (nzchar(school_code)) {
@@ -369,41 +380,54 @@ video_map_read_all_neon <- function(play_ids = NULL, school_code = video_map_sch
   } else {
     "TRUE"
   }
+  all_chunks <- list()
   if (!is.null(play_ids)) {
     play_ids <- tolower(trimws(as.character(play_ids)))
     play_ids <- unique(play_ids[nzchar(play_ids)])
     if (!length(play_ids)) return(tibble::tibble())
-    out <- list()
-    chunk_size <- 1000L
-    for (i in seq(1L, length(play_ids), by = chunk_size)) {
-      chunk <- play_ids[i:min(i + chunk_size - 1L, length(play_ids))]
-      in_sql <- paste(vapply(chunk, function(x) as.character(DBI::dbQuoteString(con, x)), character(1)), collapse = ", ")
-      sql <- sprintf(
-        "SELECT DISTINCT ON (lower(play_id), camera_slot)
+    for (tbl in existing_tables) {
+      out <- list()
+      chunk_size <- 1000L
+      for (i in seq(1L, length(play_ids), by = chunk_size)) {
+        chunk <- play_ids[i:min(i + chunk_size - 1L, length(play_ids))]
+        in_sql <- paste(vapply(chunk, function(x) as.character(DBI::dbQuoteString(con, x)), character(1)), collapse = ", ")
+        sql <- sprintf(
+          "SELECT DISTINCT ON (lower(play_id), camera_slot)
             %s
          FROM %s
          WHERE lower(play_id) IN (%s) AND %s
          ORDER BY lower(play_id), camera_slot,
            CASE WHEN upper(coalesce(school_code,'')) = %s THEN 0 ELSE 1 END,
            uploaded_at DESC NULLS LAST",
+          paste(VIDEO_MAP_TABLE_COLUMNS, collapse = ", "),
+          as.character(DBI::dbQuoteIdentifier(con, tbl)),
+          in_sql,
+          school_pred,
+          as.character(DBI::dbQuoteString(con, school_code))
+        )
+        out[[length(out) + 1L]] <- tryCatch(video_map_db_get_query(con, sql), error = function(e) tibble::tibble())
+      }
+      all_chunks[[length(all_chunks) + 1L]] <- dplyr::bind_rows(out)
+    }
+  } else {
+    for (tbl in existing_tables) {
+      sql <- sprintf(
+        "SELECT %s FROM %s WHERE %s",
         paste(VIDEO_MAP_TABLE_COLUMNS, collapse = ", "),
         as.character(DBI::dbQuoteIdentifier(con, tbl)),
-        in_sql,
-        school_pred,
-        as.character(DBI::dbQuoteString(con, school_code))
+        school_pred
       )
-      out[[length(out) + 1L]] <- tryCatch(video_map_db_get_query(con, sql), error = function(e) tibble::tibble())
+      all_chunks[[length(all_chunks) + 1L]] <- tryCatch(video_map_db_get_query(con, sql), error = function(e) tibble::tibble())
     }
-    df <- dplyr::bind_rows(out)
-  } else {
-    sql <- sprintf(
-      "SELECT %s FROM %s WHERE %s",
-      paste(VIDEO_MAP_TABLE_COLUMNS, collapse = ", "),
-      as.character(DBI::dbQuoteIdentifier(con, tbl)),
-      school_pred
-    )
-    df <- tryCatch(video_map_db_get_query(con, sql), error = function(e) tibble::tibble())
   }
+  df <- dplyr::bind_rows(all_chunks) %>% dplyr::distinct()
+  if (!is.data.frame(df) || !nrow(df)) {
+    return(tibble::tibble(!!!setNames(rep(list(character()), length(VIDEO_MAP_TABLE_COLUMNS)), VIDEO_MAP_TABLE_COLUMNS)))
+  }
+  for (nm in VIDEO_MAP_TABLE_COLUMNS) {
+    if (!nm %in% names(df)) df[[nm]] <- NA_character_
+  }
+  df <- df %>% dplyr::select(all_of(VIDEO_MAP_TABLE_COLUMNS))
   df["uploaded_at"] <- lapply(df["uploaded_at"], as.character)
   df
 }

@@ -110,6 +110,32 @@ build_project_paths <- function() {
   )
 }
 
+load_valid_pitch_play_ids <- function() {
+  if (!exists("video_map_db_connect", mode = "function")) return(character())
+  con <- tryCatch(video_map_db_connect(), error = function(e) NULL)
+  if (is.null(con)) return(character())
+  on.exit(tryCatch(DBI::dbDisconnect(con), error = function(...) NULL), add = TRUE)
+
+  tbl <- Sys.getenv("PITCH_DATA_DB_TABLE", "pitch_events")
+  tbl <- gsub("[^A-Za-z0-9_]", "_", tbl, perl = TRUE)
+  if (!nzchar(tbl)) tbl <- "pitch_events"
+  school_code <- toupper(trimws(Sys.getenv("TEAM_CODE", "OSU")))
+  if (!nzchar(school_code)) school_code <- "OSU"
+
+  sql <- sprintf(
+    "SELECT DISTINCT lower(playid) AS play_id
+     FROM %s
+     WHERE upper(coalesce(school_code,'')) = %s
+       AND playid IS NOT NULL
+       AND btrim(playid) <> ''",
+    as.character(DBI::dbQuoteIdentifier(con, tbl)),
+    as.character(DBI::dbQuoteString(con, school_code))
+  )
+  out <- tryCatch(DBI::dbGetQuery(con, sql), error = function(e) data.frame(play_id = character()))
+  ids <- unique(tolower(trimws(as.character(out$play_id %||% character(0)))))
+  ids[nzchar(ids)]
+}
+
 request_trackman_token <- function(client_id, client_secret) {
   res <- request("https://login.trackmanbaseball.com/connect/token") |>
     req_body_form(
@@ -173,7 +199,12 @@ trackman_request <- function(token, url, method = "GET", body = NULL, retries = 
         detail <- tryCatch(resp_body_string(res), error = function(e) "")
         # Don't abort on 404 errors - these are common when sessions don't exist
         if (resp_status(res) == 404) {
-          warning(glue("TrackMan API call failed ({resp_status(res)}): {detail}"))
+          # Treat expected "no media" 404s as informational noise, not warnings.
+          if (grepl("No Media was found|ResourceNotFoundException", detail, ignore.case = TRUE)) {
+            message(glue("   TrackMan media not found (404): {url}"))
+          } else {
+            warning(glue("TrackMan API call failed ({resp_status(res)}): {detail}"))
+          }
           return(NULL)
         } else {
           cli_abort(glue("TrackMan API call failed ({resp_status(res)}): {detail}"))
@@ -235,22 +266,41 @@ discover_sessions <- function(token, date_from, date_to, env = c("practice", "ga
 
 fetch_video_tokens <- function(token, session_id, env = c("practice", "game")) {
   env <- match.arg(env)
-  url <- switch(env,
-                practice = glue("https://dataapi.trackmanbaseball.com/api/v1/media/practice/videotokens/{session_id}"),
-                game     = glue("https://dataapi.trackmanbaseball.com/api/v1/media/game/videotokens/{session_id}"))
-  res <- trackman_request(token, url)
-  if (is.null(res)) return(tibble())
-  tibble::as_tibble(resp_body_json(res, simplifyVector = TRUE))
+  fetch_one <- function(which_env) {
+    url <- switch(which_env,
+                  practice = glue("https://dataapi.trackmanbaseball.com/api/v1/media/practice/videotokens/{session_id}"),
+                  game     = glue("https://dataapi.trackmanbaseball.com/api/v1/media/game/videotokens/{session_id}"))
+    res <- trackman_request(token, url)
+    if (is.null(res)) return(tibble())
+    tibble::as_tibble(resp_body_json(res, simplifyVector = TRUE))
+  }
+  out <- fetch_one(env)
+  if (nrow(out)) return(out)
+  alt_env <- setdiff(c("practice", "game"), env)[1]
+  if (length(alt_env) && nzchar(alt_env)) {
+    message(glue("   No media tokens via '{env}' endpoint; retrying '{alt_env}' for session {session_id}."))
+    out <- fetch_one(alt_env)
+  }
+  out
 }
 
 fetch_video_metadata <- function(token, session_id, env = c("practice", "game")) {
   env <- match.arg(env)
-  url <- switch(env,
-                practice = glue("https://dataapi.trackmanbaseball.com/api/v1/media/practice/videometadata/{session_id}"),
-                game     = glue("https://dataapi.trackmanbaseball.com/api/v1/media/game/videometadata/{session_id}"))
-  res <- trackman_request(token, url)
-  if (is.null(res)) return(tibble())
-  tibble::as_tibble(resp_body_json(res, simplifyVector = TRUE))
+  fetch_one <- function(which_env) {
+    url <- switch(which_env,
+                  practice = glue("https://dataapi.trackmanbaseball.com/api/v1/media/practice/videometadata/{session_id}"),
+                  game     = glue("https://dataapi.trackmanbaseball.com/api/v1/media/game/videometadata/{session_id}"))
+    res <- trackman_request(token, url)
+    if (is.null(res)) return(tibble())
+    tibble::as_tibble(resp_body_json(res, simplifyVector = TRUE))
+  }
+  out <- fetch_one(env)
+  if (nrow(out)) return(out)
+  alt_env <- setdiff(c("practice", "game"), env)[1]
+  if (length(alt_env) && nzchar(alt_env)) {
+    out <- fetch_one(alt_env)
+  }
+  out
 }
 
 parse_sas_query <- function(token) {
@@ -290,9 +340,16 @@ list_azure_blobs <- function(entity_path, endpoint, token) {
 }
 
 extract_play_id <- function(blob_name) {
-  # Expecting Plays/<PLAY_ID>/...
-  m <- str_match(blob_name, "^Plays/([0-9a-fA-F-]+)/")
-  m[, 2] %||% NA_character_
+  nm <- as.character(blob_name %||% "")
+  if (!nzchar(nm)) return(NA_character_)
+  # Primary pattern: Plays/<PLAY_ID>/... (case-insensitive, supports Play/Plays)
+  m <- str_match(nm, "(?i)(?:^|/)plays?/([0-9a-fA-F-]{32,36})(?:/|$)")
+  pid <- m[, 2] %||% NA_character_
+  if (nzchar(pid)) return(tolower(pid))
+  # Fallback: first UUID-like token anywhere in blob path
+  pid2 <- str_extract(nm, "(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+  if (!nzchar(pid2)) return(NA_character_)
+  tolower(pid2)
 }
 
 infer_camera_slot <- function(camera_name, camera_target, video_type, blob_name) {
@@ -433,12 +490,22 @@ main <- function() {
     quit(status = 0)
   }
 
+  valid_pitch_play_ids <- load_valid_pitch_play_ids()
+  has_playid_guard <- length(valid_pitch_play_ids) > 0
+  if (has_playid_guard) {
+    message(glue(">> Loaded {length(valid_pitch_play_ids)} valid pitch play IDs for TEAM_CODE={toupper(trimws(Sys.getenv('TEAM_CODE', '')))}"))
+  } else {
+    message(">> Could not load valid pitch play IDs (guard disabled); media rows will not be pre-validated against pitch_events.")
+  }
+
   video_map <- load_video_map(paths$video_map)
   new_rows <- list()
+  skipped_unmapped <- 0L
 
   for (i in seq_len(nrow(sessions))) {
     session_id_local <- sessions$sessionId[[i]]
     message(glue("-- Session {i}/{nrow(sessions)}: {session_id_local} ({sessions$sessionType[[i]] %||% \"\"})"))
+    session_skipped_unmapped <- 0L
 
     meta <- tryCatch(fetch_video_metadata(token, session_id_local, env = tm_env), error = function(e) tibble())
     tokens <- tryCatch(fetch_video_tokens(token, session_id_local, env = tm_env), error = function(e) tibble())
@@ -479,6 +546,11 @@ main <- function() {
         blob <- blobs[k, ]
         play_id <- tolower(extract_play_id(blob$blob_name))
         if (!nzchar(play_id)) next
+        if (has_playid_guard && !(play_id %in% valid_pitch_play_ids)) {
+          session_skipped_unmapped <- session_skipped_unmapped + 1L
+          skipped_unmapped <- skipped_unmapped + 1L
+          next
+        }
 
         md <- meta_by_play %>% filter(playId == play_id) %>% slice_head(n = 1)
         camera_name <- md$cameraName %||% video_type %||% ""
@@ -521,6 +593,9 @@ main <- function() {
         )
       }
     }
+    if (session_skipped_unmapped > 0L) {
+      message(glue("   Skipped {session_skipped_unmapped} blobs with play IDs not present in pitch_events for current school scope."))
+    }
   }
 
   if (length(new_rows)) {
@@ -542,6 +617,9 @@ main <- function() {
     message(glue(">> Added {nrow(additions)} new video mapping rows."))
   } else {
     message(">> No new videos uploaded.")
+  }
+  if (skipped_unmapped > 0L) {
+    message(glue(">> Skipped {skipped_unmapped} unmapped media rows (play IDs not found in pitch_events)."))
   }
 }
 
