@@ -19,7 +19,7 @@ pitch_data_normalize_school_code <- function(x) {
 
 pitch_data_default_columns <- function() {
   c(
-    "Date", "Pitcher", "Email", "PitcherThrows", "TaggedPitchType",
+    "Date", "Time", "Pitcher", "Email", "PitcherThrows", "TaggedPitchType",
     "InducedVertBreak", "HorzBreak", "RelSpeed", "ReleaseTilt", "BreakTilt",
     "SpinEfficiency", "SpinRate", "RelHeight", "RelSide", "Extension",
     "VertApprAngle", "HorzApprAngle", "PlateLocSide", "PlateLocHeight",
@@ -80,6 +80,7 @@ pitch_data_make_key <- function(df) {
 pitch_data_storage_name_map <- function() {
   c(
     Date = "date",
+    Time = "time",
     Pitcher = "pitcher",
     Email = "email",
     PitcherThrows = "pitcherthrows",

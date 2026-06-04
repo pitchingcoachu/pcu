@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS public.pitch_events (
   source_file text,
   pitch_key text,
   Date text,
+  Time text,
   Pitcher text,
   Email text,
   PitcherThrows text,
@@ -117,3 +118,5 @@ ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS BasePositionX text;
 ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS BasePositionY text;
 ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS BasePositionZ text;
 ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS TargetBase text;
+
+ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS Time text;
