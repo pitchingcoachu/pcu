@@ -131,7 +131,9 @@ school_config <- list(
   "Kaufman, Rylan",
   "Clark, Hunter",
   "Luna, Cael",
-  "Rodriguez, Diego"
+  "Rodriguez, Diego",
+  "Jensen, Tyler",
+  "Liguori, Luke"
 ),
   allowed_hitters = c(
     "Stoller, Cody",
@@ -257,7 +259,9 @@ school_config <- list(
   "Kaufman, Rylan",
   "Clark, Hunter",
   "Luna, Cael",
-  "Rodriguez, Diego"
+  "Rodriguez, Diego",
+  "Jensen, Tyler",
+  "Liguori, Luke"
 ),
   allowed_campers = character(0),
   colors = list(
