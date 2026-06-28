@@ -28,7 +28,7 @@ pitch_data_default_columns <- function() {
     "ThrowSpeed", "ExchangeTime", "PopTime", "TimeToBase",
     "BasePositionX", "BasePositionY", "BasePositionZ", "TargetBase",
     "Batter", "Catcher", "VideoClip", "VideoClip2", "VideoClip3",
-    "PitchUID", "PitchID", "PitchGuid", "SourceFile", "PitchKey"
+    "PitchUID", "PitchID", "PitchGuid", "CustomLabel", "SourceFile", "PitchKey"
   )
 }
 
@@ -129,6 +129,7 @@ pitch_data_storage_name_map <- function() {
     PitchUID = "pitchuid",
     PitchID = "pitchid",
     PitchGuid = "pitchguid",
+    CustomLabel = "customlabel",
     SourceFile = "source_file",
     PitchKey = "pitch_key"
   )

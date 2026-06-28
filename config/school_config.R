@@ -133,7 +133,10 @@ school_config <- list(
   "Luna, Cael",
   "Rodriguez, Diego",
   "Jensen, Tyler",
-  "Liguori, Luke"
+  "Liguori, Luke",
+  "Tipton, Jonathan",
+  "Lambright, Gavin",
+  "Moorhouse, Richard"
 ),
   allowed_hitters = c(
     "Stoller, Cody",

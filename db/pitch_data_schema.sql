@@ -120,3 +120,4 @@ ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS BasePositionZ text;
 ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS TargetBase text;
 
 ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS Time text;
+ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS customlabel text;
