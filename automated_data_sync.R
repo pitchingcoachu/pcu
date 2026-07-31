@@ -19,7 +19,7 @@ if (file.exists("pitch_data_service.R")) {
 # FTP credentials
 FTP_HOST <- "ftp.trackmanbaseball.com"
 FTP_USER <- "Jared Gaynor"
-FTP_PASS <- "Wev4SdE2a8"
+FTP_PASS <- "uVeo9vDRhX"
 # When passwords contain special characters like @ or %, don't embed them in the URL.
 FTP_USERPWD <- paste0(FTP_USER, ":", FTP_PASS)
 
