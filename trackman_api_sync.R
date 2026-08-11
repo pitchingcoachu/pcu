@@ -353,6 +353,22 @@ extract_play_id <- function(blob_name) {
 }
 
 infer_camera_slot <- function(camera_name, camera_target, video_type, blob_name) {
+  # VideoClip (slot 1) is what pcudashboard treats as "the Edgertronic slot"
+  # -- confirmed via manual review that clips landing there without actually
+  # being Edgertronic footage get mislabeled downstream. Previously this
+  # function's fallback for "nothing matched" was VideoClip itself, which
+  # meant any clip with an ambiguous/missing camera_target (a real, common
+  # case -- e.g. a wide overview camera with no natural "1b"/"3b" keyword)
+  # silently landed in the Edger slot even when video_type explicitly said
+  # "iPhoneVideos". Now: an explicit non-Edgertronic video_type is checked
+  # FIRST and always wins, before any target/keyword matching runs, and the
+  # ambiguous-fallback default is VideoClip2 (not VideoClip) -- so slot 1
+  # must be positively earned by an actual Edgertronic signal, never
+  # defaulted into.
+  video_type_norm <- tolower(video_type %||% "")
+  is_explicitly_non_edger <- nzchar(video_type_norm) && !str_detect(video_type_norm, "edger")
+  is_explicitly_edger <- str_detect(video_type_norm, "edger")
+
   fields <- tolower(paste(
     camera_name %||% "",
     camera_target %||% "",
@@ -362,17 +378,26 @@ infer_camera_slot <- function(camera_name, camera_target, video_type, blob_name)
   pick_by_target <- function(target) {
     if (!nzchar(target)) return(NA_character_)
     t <- tolower(target)
-    if (str_detect(t, "back")) return("VideoClip")
     if (str_detect(t, "1b") || str_detect(t, "first") || str_detect(t, "home") || str_detect(t, "center")) return("VideoClip2")
     if (str_detect(t, "3b") || str_detect(t, "third") || str_detect(t, "side")) return("VideoClip3")
+    if (str_detect(t, "back")) return("VideoClip")
     NA_character_
   }
+
+  if (is_explicitly_edger) return("VideoClip")
+
   candidate <- pick_by_target(camera_target)
   if (!is.na(candidate)) return(candidate)
+
+  if (is_explicitly_non_edger) return("VideoClip2")
+
   if (str_detect(fields, "edger")) return("VideoClip")
   if (str_detect(fields, "1b") || str_detect(fields, "first") || str_detect(fields, "behind") || str_detect(fields, "center")) return("VideoClip2")
   if (str_detect(fields, "3b") || str_detect(fields, "third") || str_detect(fields, "side")) return("VideoClip3")
-  "VideoClip"
+  # Truly ambiguous (no video_type at all, no target, no keyword match):
+  # default to VideoClip2 rather than VideoClip, so an unknown clip never
+  # silently masquerades as the Edger slot.
+  "VideoClip2"
 }
 
 build_blob_url <- function(entity_path, endpoint, blob_name, token) {
