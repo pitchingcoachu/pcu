@@ -352,27 +352,50 @@ extract_play_id <- function(blob_name) {
   tolower(pid2)
 }
 
-infer_camera_slot <- function(camera_name, camera_target, video_type, blob_name) {
+infer_camera_slot <- function(camera_name, camera_target, video_type, blob_name, camera_type = "") {
   # VideoClip (slot 1) is what pcudashboard treats as "the Edgertronic slot"
   # -- confirmed via manual review that clips landing there without actually
-  # being Edgertronic footage get mislabeled downstream. Previously this
-  # function's fallback for "nothing matched" was VideoClip itself, which
-  # meant any clip with an ambiguous/missing camera_target (a real, common
-  # case -- e.g. a wide overview camera with no natural "1b"/"3b" keyword)
-  # silently landed in the Edger slot even when video_type explicitly said
-  # "iPhoneVideos". Now: an explicit non-Edgertronic video_type is checked
-  # FIRST and always wins, before any target/keyword matching runs, and the
-  # ambiguous-fallback default is VideoClip2 (not VideoClip) -- so slot 1
-  # must be positively earned by an actual Edgertronic signal, never
-  # defaulted into.
+  # being Edgertronic footage get mislabeled downstream.
+  #
+  # camera_type (from TrackMan's videometadata API) is the most authoritative
+  # signal available: it's TrackMan's own structured per-CLIP classification
+  # ("iPhone" / "Edgertronic"), confirmed via a raw API dump to be reliably
+  # populated -- unlike camera_name, which is frequently blank. video_type
+  # (from the videotokens container, e.g. "EdgertronicVideos"/"iPhoneVideos")
+  # is per-CONTAINER rather than per-clip, so camera_type is checked first
+  # and video_type is used only when camera_type is missing/blank.
+  #
+  # Neither signal alone disambiguates the two physical iPhones, since both
+  # share a single "iPhoneVideos" container/camera_type value -- that split
+  # still relies on camera_target/keyword matching below.
+  #
+  # Previously camera_target keyword matching (e.g. a target containing
+  # "back") ran before the explicit video_type check, so an iPhone clip with
+  # camera_target = "PitchersBack" still landed in VideoClip purely because
+  # "back" matched -- even though video_type said "iPhoneVideos". Now an
+  # explicit non-Edgertronic camera_type/video_type always wins over any
+  # target/keyword match, and slot 1 must be positively earned by an actual
+  # Edgertronic signal, never defaulted or keyword-guessed into over an
+  # explicit contrary signal.
+  camera_type_norm <- tolower(camera_type %||% "")
   video_type_norm <- tolower(video_type %||% "")
-  is_explicitly_non_edger <- nzchar(video_type_norm) && !str_detect(video_type_norm, "edger")
-  is_explicitly_edger <- str_detect(video_type_norm, "edger")
+
+  is_explicitly_non_edger <- if (nzchar(camera_type_norm)) {
+    !str_detect(camera_type_norm, "edger")
+  } else {
+    nzchar(video_type_norm) && !str_detect(video_type_norm, "edger")
+  }
+  is_explicitly_edger <- if (nzchar(camera_type_norm)) {
+    str_detect(camera_type_norm, "edger")
+  } else {
+    str_detect(video_type_norm, "edger")
+  }
 
   fields <- tolower(paste(
     camera_name %||% "",
     camera_target %||% "",
     video_type %||% "",
+    camera_type %||% "",
     blob_name %||% ""
   ))
   pick_by_target <- function(target) {
@@ -386,10 +409,21 @@ infer_camera_slot <- function(camera_name, camera_target, video_type, blob_name)
 
   if (is_explicitly_edger) return("VideoClip")
 
+  if (is_explicitly_non_edger) {
+    # video_type has positively ruled out Edgertronic -- never let a
+    # camera_target/keyword match (e.g. "back") override that and route
+    # this clip into the Edger slot anyway.
+    candidate <- pick_by_target(camera_target)
+    if (!is.na(candidate) && candidate != "VideoClip") return(candidate)
+    if (str_detect(fields, "1b") || str_detect(fields, "first") || str_detect(fields, "behind") || str_detect(fields, "center")) return("VideoClip2")
+    if (str_detect(fields, "3b") || str_detect(fields, "third") || str_detect(fields, "side")) return("VideoClip3")
+    return("VideoClip2")
+  }
+
+  # video_type is missing/blank -- fall back to target/keyword matching as
+  # the best available signal, same as before.
   candidate <- pick_by_target(camera_target)
   if (!is.na(candidate)) return(candidate)
-
-  if (is_explicitly_non_edger) return("VideoClip2")
 
   if (str_detect(fields, "edger")) return("VideoClip")
   if (str_detect(fields, "1b") || str_detect(fields, "first") || str_detect(fields, "behind") || str_detect(fields, "center")) return("VideoClip2")
@@ -541,10 +575,15 @@ main <- function() {
     }
 
     if (!nrow(meta)) {
-      meta <- tibble(playId = character(), cameraName = character(), cameraTarget = character())
+      meta <- tibble(playId = character(), cameraName = character(), cameraTarget = character(), cameraType = character())
     } else {
       if (!"cameraName" %in% names(meta))  meta$cameraName  <- NA_character_
       if (!"cameraTarget" %in% names(meta)) meta$cameraTarget <- NA_character_
+      # cameraType is TrackMan's own structured, authoritative field for what
+      # kind of camera captured a clip (e.g. "iPhone" / "Edgertronic") --
+      # confirmed via a raw API response dump that this exists and is
+      # reliably populated, unlike cameraName which is frequently blank.
+      if (!"cameraType" %in% names(meta)) meta$cameraType <- NA_character_
       if (!"playId" %in% names(meta)) meta$playId <- NA_character_
     }
 
@@ -577,11 +616,33 @@ main <- function() {
           next
         }
 
-        md <- meta_by_play %>% filter(playId == play_id) %>% slice_head(n = 1)
+        # A play can have multiple metadata rows (one per physical clip --
+        # e.g. one iPhone clip and one Edgertronic clip share the same
+        # playId but have different videoClipIds). Blob names only encode
+        # play_id, not videoClipId, so we can't join on clip identity -- but
+        # the token/container this blob came from (video_type, e.g.
+        # "iPhoneVideos" vs "EdgertronicVideos") tells us definitively which
+        # camera type produced THIS blob. Filter metadata rows to the
+        # matching cameraType first so we never accidentally pick the wrong
+        # camera's row (e.g. an Edgertronic metadata row for an iPhone blob),
+        # which was silently possible with the old playId-only match.
+        video_type_norm <- tolower(video_type %||% "")
+        expected_camera_type <- if (str_detect(video_type_norm, "edger")) "edgertronic" else if (nzchar(video_type_norm)) "iphone" else ""
+
+        play_meta <- meta_by_play %>% filter(playId == play_id)
+        md <- if (nzchar(expected_camera_type) && "cameraType" %in% names(play_meta)) {
+          matched <- play_meta %>% filter(tolower(cameraType %||% "") == expected_camera_type)
+          if (nrow(matched)) matched else play_meta
+        } else {
+          play_meta
+        }
+        md <- md %>% slice_head(n = 1)
+
         camera_name <- md$cameraName %||% video_type %||% ""
         camera_target <- md$cameraTarget %||% ""
+        camera_type <- md$cameraType %||% ""
 
-        slot <- infer_camera_slot(camera_name, camera_target, video_type, blob$blob_name)
+        slot <- infer_camera_slot(camera_name, camera_target, video_type, blob$blob_name, camera_type)
         already <- video_map %>%
           filter(
             tolower(session_id) == tolower(session_id_local),
