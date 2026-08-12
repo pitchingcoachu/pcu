@@ -352,6 +352,23 @@ extract_play_id <- function(blob_name) {
   tolower(pid2)
 }
 
+extract_video_clip_id <- function(blob_name) {
+  # Blob names are Plays/<play_id>/<CameraFolder>/<videoClipId>.mov -- the
+  # videoClipId in the filename matches videometadata's own videoClipId
+  # field exactly, giving us an unambiguous 1:1 join between a specific blob
+  # and a specific metadata row. This is essential when a play has multiple
+  # same-cameraType clips (e.g. two iPhones both filed under "iPhoneVideos"),
+  # where matching by playId + cameraType alone can't tell the clips apart.
+  nm <- as.character(blob_name %||% "")
+  if (!nzchar(nm)) return(NA_character_)
+  base <- basename(nm)
+  base_noext <- sub("\\.[^.]*$", "", base)
+  if (!grepl("(?i)^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", base_noext)) {
+    return(NA_character_)
+  }
+  tolower(base_noext)
+}
+
 infer_camera_slot <- function(camera_name, camera_target, video_type, blob_name, camera_type = "") {
   # VideoClip (slot 1) is what pcudashboard treats as "the Edgertronic slot"
   # -- confirmed via manual review that clips landing there without actually
@@ -560,6 +577,17 @@ main <- function() {
   video_map <- load_video_map(paths$video_map)
   new_rows <- list()
   skipped_unmapped <- 0L
+  # Tracks which camera_slot values have already been claimed for a given
+  # play_id THIS RUN, keyed as "<play_id>|<slot>". Needed because when two
+  # iPhone clips for the same play both lack a distinguishing cameraTarget
+  # (confirmed common -- 230 of 719 iPhone clips in a real session had no
+  # cameraTarget at all), infer_camera_slot() alone would independently
+  # return the same ambiguous-default slot (VideoClip2) for both, causing
+  # the second clip to silently overwrite the first under the
+  # (session_id, camera_slot, play_id) upsert key. When a slot is already
+  # claimed for this play, we deterministically bump to the next open
+  # iPhone slot instead.
+  claimed_slots <- new.env(parent = emptyenv())
 
   for (i in seq_len(nrow(sessions))) {
     session_id_local <- sessions$sessionId[[i]]
@@ -575,7 +603,7 @@ main <- function() {
     }
 
     if (!nrow(meta)) {
-      meta <- tibble(playId = character(), cameraName = character(), cameraTarget = character(), cameraType = character())
+      meta <- tibble(playId = character(), videoClipId = character(), cameraName = character(), cameraTarget = character(), cameraType = character())
     } else {
       if (!"cameraName" %in% names(meta))  meta$cameraName  <- NA_character_
       if (!"cameraTarget" %in% names(meta)) meta$cameraTarget <- NA_character_
@@ -584,12 +612,25 @@ main <- function() {
       # confirmed via a raw API response dump that this exists and is
       # reliably populated, unlike cameraName which is frequently blank.
       if (!"cameraType" %in% names(meta)) meta$cameraType <- NA_character_
+      if (!"videoClipId" %in% names(meta)) meta$videoClipId <- NA_character_
       if (!"playId" %in% names(meta)) meta$playId <- NA_character_
     }
 
     meta_by_play <- meta %>%
-      mutate(playId = tolower(playId %||% "")) %>%
+      mutate(
+        playId = tolower(playId %||% ""),
+        videoClipId = tolower(videoClipId %||% "")
+      ) %>%
       filter(nzchar(playId))
+    # videoClipId -> metadata row, for the common case where a play has
+    # multiple same-cameraType clips (e.g. two physical iPhones both filed
+    # under cameraType "iPhone") that playId+cameraType alone can't tell
+    # apart -- confirmed via a raw API dump that two iPhone clips for the
+    # same play can have completely different cameraTarget values
+    # ("PitchersBack" vs "PitchersOpenSide") despite sharing playId and
+    # cameraType, and that blob filenames are literally
+    # "<videoClipId>.mov", giving an exact 1:1 join key.
+    meta_by_clip_id <- meta_by_play %>% filter(nzchar(videoClipId))
 
     for (j in seq_len(nrow(tokens))) {
       tok <- tokens[j, ]
@@ -617,32 +658,71 @@ main <- function() {
         }
 
         # A play can have multiple metadata rows (one per physical clip --
-        # e.g. one iPhone clip and one Edgertronic clip share the same
-        # playId but have different videoClipIds). Blob names only encode
-        # play_id, not videoClipId, so we can't join on clip identity -- but
-        # the token/container this blob came from (video_type, e.g.
-        # "iPhoneVideos" vs "EdgertronicVideos") tells us definitively which
-        # camera type produced THIS blob. Filter metadata rows to the
-        # matching cameraType first so we never accidentally pick the wrong
-        # camera's row (e.g. an Edgertronic metadata row for an iPhone blob),
-        # which was silently possible with the old playId-only match.
-        video_type_norm <- tolower(video_type %||% "")
-        expected_camera_type <- if (str_detect(video_type_norm, "edger")) "edgertronic" else if (nzchar(video_type_norm)) "iphone" else ""
-
-        play_meta <- meta_by_play %>% filter(playId == play_id)
-        md <- if (nzchar(expected_camera_type) && "cameraType" %in% names(play_meta)) {
-          matched <- play_meta %>% filter(tolower(cameraType %||% "") == expected_camera_type)
-          if (nrow(matched)) matched else play_meta
+        # e.g. two different iPhones, or an iPhone + an Edgertronic, all
+        # sharing the same playId but each with a distinct videoClipId).
+        # Blob filenames are literally "<videoClipId>.mov", which matches
+        # videometadata's own videoClipId field exactly -- so join on that
+        # first for an unambiguous 1:1 match between this specific blob and
+        # its specific metadata row. This is required to distinguish two
+        # same-cameraType clips (e.g. two iPhones both under cameraType
+        # "iPhone"), which playId+cameraType filtering alone cannot do --
+        # confirmed via a raw API dump where two iPhone clips for the same
+        # play had different cameraTarget values ("PitchersBack" vs
+        # "PitchersOpenSide") but were indistinguishable by playId+cameraType.
+        video_clip_id <- extract_video_clip_id(blob$blob_name)
+        md <- if (!is.na(video_clip_id) && nzchar(video_clip_id)) {
+          meta_by_clip_id %>% filter(videoClipId == video_clip_id) %>% slice_head(n = 1)
         } else {
-          play_meta
+          tibble()
         }
-        md <- md %>% slice_head(n = 1)
+
+        if (!nrow(md)) {
+          # Fall back to playId+cameraType filtering when the blob name
+          # doesn't yield a parseable videoClipId, or no metadata row has
+          # that clip id. video_type (the token/container this blob came
+          # from, e.g. "iPhoneVideos"/"EdgertronicVideos") tells us
+          # definitively which camera type produced THIS blob, so filter to
+          # matching cameraType first so we never accidentally pick the
+          # wrong camera's row (e.g. an Edgertronic metadata row for an
+          # iPhone blob). Note this fallback still can't disambiguate two
+          # same-cameraType clips (e.g. two iPhones) from each other.
+          video_type_norm <- tolower(video_type %||% "")
+          expected_camera_type <- if (str_detect(video_type_norm, "edger")) "edgertronic" else if (nzchar(video_type_norm)) "iphone" else ""
+
+          play_meta <- meta_by_play %>% filter(playId == play_id)
+          md <- if (nzchar(expected_camera_type) && "cameraType" %in% names(play_meta)) {
+            matched <- play_meta %>% filter(tolower(cameraType %||% "") == expected_camera_type)
+            if (nrow(matched)) matched else play_meta
+          } else {
+            play_meta
+          }
+          md <- md %>% slice_head(n = 1)
+        }
 
         camera_name <- md$cameraName %||% video_type %||% ""
         camera_target <- md$cameraTarget %||% ""
         camera_type <- md$cameraType %||% ""
 
         slot <- infer_camera_slot(camera_name, camera_target, video_type, blob$blob_name, camera_type)
+
+        # If this exact blob already claimed this slot for this play
+        # (e.g. a re-run), that's fine -- it's the same clip, not a
+        # collision. Only bump to the next open slot when a DIFFERENT clip
+        # already holds it.
+        claim_key <- function(s) paste(play_id, s, sep = "|")
+        prior_blob <- claimed_slots[[claim_key(slot)]]
+        if (!is.null(prior_blob) && !identical(prior_blob, blob$blob_name)) {
+          candidates <- if (slot == "VideoClip") c("VideoClip") else c("VideoClip2", "VideoClip3")
+          for (cand in candidates) {
+            held_by <- claimed_slots[[claim_key(cand)]]
+            if (is.null(held_by) || identical(held_by, blob$blob_name)) {
+              slot <- cand
+              break
+            }
+          }
+        }
+        claimed_slots[[claim_key(slot)]] <- blob$blob_name
+
         already <- video_map %>%
           filter(
             tolower(session_id) == tolower(session_id_local),
