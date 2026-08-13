@@ -417,24 +417,31 @@ infer_camera_slot <- function(camera_name, camera_target, video_type, blob_name,
     camera_type %||% "",
     blob_name %||% ""
   ))
+  # For non-Edger (iPhone) clips, VideoClip2 is always the side/landscape
+  # angle and VideoClip3 is always the behind/portrait angle -- confirmed
+  # against real cameraTarget values: "PitchersBack" (behind, portrait) ->
+  # VideoClip2, "PitchersOpenSide" (side, landscape) -> VideoClip3.
+  # "PitchersBack" previously had NO explicit mapping here and fell through
+  # to the same ambiguous-default bucket as a blank target, so which of the
+  # two physical iPhones landed in VideoClip2 vs VideoClip3 for a given play
+  # depended on blob processing order rather than the actual camera --
+  # confirmed via real data: 123 pairs had Back=VideoClip2/OpenSide=
+  # VideoClip3 (correct) but 15 pairs had it flipped. "back" now resolves
+  # deterministically instead of falling through.
   pick_by_target <- function(target) {
     if (!nzchar(target)) return(NA_character_)
     t <- tolower(target)
-    if (str_detect(t, "1b") || str_detect(t, "first") || str_detect(t, "home") || str_detect(t, "center")) return("VideoClip2")
+    if (str_detect(t, "1b") || str_detect(t, "first") || str_detect(t, "home") || str_detect(t, "center") || str_detect(t, "back")) return("VideoClip2")
     if (str_detect(t, "3b") || str_detect(t, "third") || str_detect(t, "side")) return("VideoClip3")
-    if (str_detect(t, "back")) return("VideoClip")
     NA_character_
   }
 
   if (is_explicitly_edger) return("VideoClip")
 
   if (is_explicitly_non_edger) {
-    # video_type has positively ruled out Edgertronic -- never let a
-    # camera_target/keyword match (e.g. "back") override that and route
-    # this clip into the Edger slot anyway.
     candidate <- pick_by_target(camera_target)
-    if (!is.na(candidate) && candidate != "VideoClip") return(candidate)
-    if (str_detect(fields, "1b") || str_detect(fields, "first") || str_detect(fields, "behind") || str_detect(fields, "center")) return("VideoClip2")
+    if (!is.na(candidate)) return(candidate)
+    if (str_detect(fields, "1b") || str_detect(fields, "first") || str_detect(fields, "behind") || str_detect(fields, "center") || str_detect(fields, "back")) return("VideoClip2")
     if (str_detect(fields, "3b") || str_detect(fields, "third") || str_detect(fields, "side")) return("VideoClip3")
     return("VideoClip2")
   }
@@ -445,7 +452,7 @@ infer_camera_slot <- function(camera_name, camera_target, video_type, blob_name,
   if (!is.na(candidate)) return(candidate)
 
   if (str_detect(fields, "edger")) return("VideoClip")
-  if (str_detect(fields, "1b") || str_detect(fields, "first") || str_detect(fields, "behind") || str_detect(fields, "center")) return("VideoClip2")
+  if (str_detect(fields, "1b") || str_detect(fields, "first") || str_detect(fields, "behind") || str_detect(fields, "center") || str_detect(fields, "back")) return("VideoClip2")
   if (str_detect(fields, "3b") || str_detect(fields, "third") || str_detect(fields, "side")) return("VideoClip3")
   # Truly ambiguous (no video_type at all, no target, no keyword match):
   # default to VideoClip2 rather than VideoClip, so an unknown clip never
