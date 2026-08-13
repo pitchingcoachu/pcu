@@ -1,10 +1,10 @@
 #!/usr/bin/env Rscript
-# Read-only diagnostic: look up specific videoClipIds in the raw
-# videometadata response to check whether TrackMan itself mislabels
-# Edgertronic clips as cameraType/cameraName "iPhone", or whether that
-# mislabel is introduced by our own matching logic.
+# Read-only diagnostic: dump ALL videometadata rows for a given playId, to
+# check for any surprises (e.g. multiple Edgertronic rows, duplicate
+# videoClipIds, or unexpected column values) that could explain a mismatch
+# between the raw source data and what our sync script matched.
 #
-# Usage: Rscript diagnose_video_tokens.R <session_id> <clip_id_1> [clip_id_2 ...]
+# Usage: Rscript diagnose_video_tokens.R <session_id> <play_id>
 
 suppressPackageStartupMessages({
   library(httr2)
@@ -16,7 +16,7 @@ suppressPackageStartupMessages({
 
 args <- commandArgs(trailingOnly = TRUE)
 session_id <- args[[1]]
-clip_ids <- tolower(args[-1])
+play_id <- tolower(args[[2]])
 
 client_id <- Sys.getenv("TM_CLIENT_ID")
 client_secret <- Sys.getenv("TM_CLIENT_SECRET")
@@ -37,8 +37,12 @@ res <- request(url) |>
   req_perform()
 parsed <- fromJSON(resp_body_string(res), simplifyVector = TRUE)
 
-for (cid in clip_ids) {
-  sub <- parsed[tolower(parsed$videoClipId) == cid, , drop = FALSE]
-  message(glue(">> videoClipId={cid}: {nrow(sub)} row(s)"))
-  if (nrow(sub)) print(toJSON(sub, pretty = TRUE, auto_unbox = TRUE))
-}
+sub <- parsed[tolower(parsed$playId) == play_id, , drop = FALSE]
+message(glue(">> playId={play_id}: {nrow(sub)} metadata row(s)"))
+print(toJSON(sub, pretty = TRUE, auto_unbox = TRUE))
+
+message(">> Checking for duplicate videoClipIds across ENTIRE session:")
+dup_clip_ids <- table(tolower(parsed$videoClipId))
+dups <- dup_clip_ids[dup_clip_ids > 1]
+message(glue(">> duplicate videoClipIds found: {length(dups)}"))
+if (length(dups) > 0) print(dups[1:min(5, length(dups))])

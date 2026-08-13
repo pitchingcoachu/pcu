@@ -7,8 +7,8 @@ on:
         description: 'TrackMan session_id'
         required: true
         default: '6f4d67db-c3b1-42b6-97ba-38ab8b949c1d'
-      clip_ids:
-        description: 'Space-separated videoClipIds to inspect'
+      play_id:
+        description: 'playId to inspect'
         required: false
         default: ''
 
@@ -41,4 +41,4 @@ jobs:
         env:
           TM_CLIENT_ID: ${{ secrets.TM_CLIENT_ID }}
           TM_CLIENT_SECRET: ${{ secrets.TM_CLIENT_SECRET }}
-        run: Rscript diagnose_video_tokens.R "${{ inputs.session_id }}" ${{ inputs.clip_ids }}
+        run: Rscript diagnose_video_tokens.R "${{ inputs.session_id }}" "${{ inputs.play_id }}"
