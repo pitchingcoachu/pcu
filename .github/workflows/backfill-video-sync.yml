@@ -1,0 +1,101 @@
+name: Backfill Video Sync (date range)
+
+on:
+  workflow_dispatch:
+    inputs:
+      from_date:
+        description: 'Start date (YYYY-MM-DD)'
+        required: true
+      to_date:
+        description: 'End date (YYYY-MM-DD, defaults to from_date)'
+        required: false
+        default: ''
+
+jobs:
+  sync-only:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup R
+      uses: r-lib/actions/setup-r@v2
+      with:
+        r-version: '4.4.0'
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          libcurl4-openssl-dev \
+          libssl-dev \
+          libxml2-dev \
+          libfontconfig1-dev \
+          libharfbuzz-dev \
+          libfribidi-dev \
+          libfreetype6-dev \
+          libpng-dev \
+          libjpeg-dev \
+          libtiff-dev \
+          libfontconfig1 \
+          libxcb1 \
+          libicu-dev \
+          libcairo2-dev \
+          libgdal-dev \
+          libgeos-dev \
+          libproj-dev \
+          libudunits2-dev \
+          librsvg2-dev
+
+    - name: Write .Renviron
+      run: |
+        cat > .Renviron <<'EOF'
+        PITCH_MOD_DB_PATH=/home/shiny/pcu_pitch_dashboard/pitch_modifications.db
+        PITCH_MOD_EXPORT_PATH=/home/shiny/pcu_pitch_dashboard/pitch_type_modifications.csv
+        MYSQL_HOST=${{ secrets.MYSQL_HOST }}
+        MYSQL_DB=${{ secrets.MYSQL_DB }}
+        MYSQL_USER=${{ secrets.MYSQL_USER }}
+        MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}
+        MYSQL_PORT=3306
+        MYSQL_SSL_CA=
+        TEAM_CODE=PCU
+        PITCH_DATA_BACKEND=postgres
+        PITCH_DATA_DB_URL=${{ secrets.PITCH_DATA_DB_URL }}
+        PITCH_DATA_SYNC_AFTER_FTP=1
+        PITCH_DATA_SYNC_WORKERS=1
+        VIDEO_MAP_DB_TABLE=video_map_pcu
+        VIDEO_MAP_ALLOW_NULL_FALLBACK=false
+        TM_SYNC_START_YEAR=2026
+        CREDENTIALS_SQLITE_PATH=/home/shiny/credentials.sqlite
+        EOF
+
+    - name: Ensure Packrat library path
+      run: mkdir -p packrat/lib-R
+
+    - name: Cache Packrat library
+      uses: actions/cache@v4
+      with:
+        path: packrat/lib-R
+        key: ${{ runner.os }}-r-packrat-${{ hashFiles('packrat/packrat.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-r-packrat-
+
+    - name: Install R packages
+      env:
+        R_LIBS_USER: packrat/lib-R
+      run: Rscript install_packages.R
+
+    - name: Sync TrackMan media (EdgeR -> Cloudinary) for date range
+      env:
+        R_LIBS_USER: packrat/lib-R
+        TM_CLIENT_ID: ${{ secrets.TM_CLIENT_ID }}
+        TM_CLIENT_SECRET: ${{ secrets.TM_CLIENT_SECRET }}
+        CLOUDINARY_CLOUD_NAME: ${{ secrets.CLOUDINARY_CLOUD_NAME }}
+        CLOUDINARY_UPLOAD_PRESET: ${{ secrets.CLOUDINARY_UPLOAD_PRESET }}
+        CLOUDINARY_FOLDER: ${{ secrets.CLOUDINARY_FOLDER }}
+        TM_ENV: ${{ secrets.TM_ENV }}
+      run: |
+        TO_DATE="${{ inputs.to_date }}"
+        if [ -z "$TO_DATE" ]; then TO_DATE="${{ inputs.from_date }}"; fi
+        Rscript trackman_api_sync.R "${{ inputs.from_date }}" "$TO_DATE"
