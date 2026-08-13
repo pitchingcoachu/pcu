@@ -23,6 +23,7 @@
 #
 suppressPackageStartupMessages({
   library(httr2)
+  library(curl)
   library(jsonlite)
   library(dplyr)
   library(purrr)
@@ -457,10 +458,30 @@ build_blob_url <- function(entity_path, endpoint, blob_name, token) {
 }
 
 upload_cloudinary <- function(azure_url, preset, cloud_name, public_id = NULL) {
+  # Upload the actual downloaded bytes rather than handing Cloudinary the
+  # Azure SAS URL to fetch remotely -- confirmed via checksum comparison that
+  # remote-URL "fetch" uploads (file = azure_url) can occasionally deliver
+  # ANOTHER recently-uploaded clip's content under this public_id (two
+  # different Azure source blobs, different recorded azure_md5, but
+  # byte-identical Cloudinary output -- a real Cloudinary-side race when
+  # multiple async remote fetches are in flight close together for the same
+  # session/public_id prefix). Downloading first and uploading the bytes
+  # directly makes the upload synchronous and content-addressed by what we
+  # actually sent, eliminating that race entirely.
+  local_path <- tempfile(fileext = ".mov")
+  on.exit(unlink(local_path), add = TRUE)
+  dl <- request(azure_url) |>
+    req_timeout(60) |>
+    req_error(is_error = ~ FALSE) |>
+    req_perform(path = local_path)
+  if (resp_status(dl) >= 400) {
+    cli_abort(glue("Failed to download source clip ({resp_status(dl)}) from Azure before upload."))
+  }
+
   endpoint <- glue("https://api.cloudinary.com/v1_1/{cloud_name}/auto/upload")
   body <- list(
     upload_preset = preset,
-    file = azure_url,
+    file = curl::form_file(local_path),
     resource_type = "video"
   )
   if (!is.null(public_id) && nzchar(public_id)) {
