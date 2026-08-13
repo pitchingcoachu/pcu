@@ -32,6 +32,7 @@ suppressPackageStartupMessages({
   library(lubridate)
   library(xml2)
   library(glue)
+  library(digest)
 })
 
 if (file.exists("video_map_helpers.R")) {
@@ -754,7 +755,21 @@ main <- function() {
         if (nrow(already)) next
 
         azure_url <- build_blob_url(entity_path, endpoint, blob$blob_name, sas_token)
-        public_id <- sanitize_public_id(folder, session_id_local, slot, substr(play_id, 1, 12))
+        # Cloudinary's unsigned upload preset cannot enable "overwrite"
+        # (confirmed: the Cloudinary console itself rejects
+        # settings[overwrite]=true on unsigned presets) -- so a re-upload
+        # under the SAME public_id silently keeps the pre-existing asset's
+        # content instead of replacing it, even when we send genuinely
+        # different bytes. This was the real cause of two different source
+        # clips (different azure_md5) ending up served as byte-identical
+        # Cloudinary content under their respective VideoClip2/VideoClip3
+        # public_ids. A short hash of the actual blob content makes every
+        # upload's public_id unique to what's actually being uploaded, so
+        # there's never a same-public_id collision to "overwrite" in the
+        # first place, while still deterministically reusing the same
+        # public_id if the exact same bytes are ever uploaded again.
+        content_suffix <- substr(digest::digest(blob$content_md5 %||% blob$blob_name, algo = "crc32"), 1, 8)
+        public_id <- sanitize_public_id(folder, session_id_local, slot, substr(play_id, 1, 12), content_suffix)
         message(glue("   Uploading play {play_id} [{slot}] ({camera_name})"))
         upload <- tryCatch(
           upload_cloudinary(azure_url, preset, cloud_name, public_id = public_id),
