@@ -342,14 +342,15 @@ video_map_ensure_table <- function(con, table) {
       PRIMARY KEY (session_id, camera_slot, play_id)
     )
   "))
-  cols <- tryCatch(DBI::dbListFields(con, table), error = function(e) character(0))
-  cols <- tolower(as.character(cols))
-  if (!"school_code" %in% cols) {
-    video_map_db_execute(con, sprintf(
-      "ALTER TABLE %s ADD COLUMN school_code TEXT",
-      as.character(tbl_id)
-    ))
-  }
+  # Use IF NOT EXISTS directly rather than checking dbListFields() first --
+  # confirmed that check can report a false "missing" (e.g. dbListFields
+  # failing/returning empty on a connection that hasn't refreshed its schema
+  # cache) and then crash the whole sync run on ALTER TABLE ... ADD COLUMN
+  # against an already-existing column.
+  video_map_db_execute(con, sprintf(
+    "ALTER TABLE %s ADD COLUMN IF NOT EXISTS school_code TEXT",
+    as.character(tbl_id)
+  ))
   video_map_db_execute(con, sprintf(
     "CREATE INDEX IF NOT EXISTS %s ON %s (school_code, play_id, camera_slot)",
     as.character(DBI::dbQuoteIdentifier(con, paste0(table, "_school_play_idx"))),
