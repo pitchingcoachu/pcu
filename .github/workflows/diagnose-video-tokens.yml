@@ -6,8 +6,8 @@ on:
       session_id:
         description: 'TrackMan session_id'
         required: true
-      play_ids:
-        description: 'Space-separated playIds to inspect'
+      play_id_substring:
+        description: 'play_id substring to search blob names for'
         required: false
         default: ''
 
@@ -34,10 +34,10 @@ jobs:
             libxml2-dev
 
       - name: Install R packages
-        run: Rscript -e 'install.packages(c("httr2","jsonlite","glue"), repos="https://cloud.r-project.org")'
+        run: Rscript -e 'install.packages(c("httr2","jsonlite","glue","xml2"), repos="https://cloud.r-project.org")'
 
       - name: Run diagnostic
         env:
           TM_CLIENT_ID: ${{ secrets.TM_CLIENT_ID }}
           TM_CLIENT_SECRET: ${{ secrets.TM_CLIENT_SECRET }}
-        run: Rscript diagnose_video_tokens.R "${{ inputs.session_id }}" ${{ inputs.play_ids }}
+        run: Rscript diagnose_video_tokens.R "${{ inputs.session_id }}" "${{ inputs.play_id_substring }}"
