@@ -28,7 +28,12 @@ pitch_data_default_columns <- function() {
     "ThrowSpeed", "ExchangeTime", "PopTime", "TimeToBase",
     "BasePositionX", "BasePositionY", "BasePositionZ", "TargetBase",
     "Batter", "Catcher", "VideoClip", "VideoClip2", "VideoClip3",
-    "PitchUID", "PitchID", "PitchGuid", "CustomLabel", "SourceFile", "PitchKey"
+    "PitchUID", "PitchID", "PitchGuid", "CustomLabel", "SourceFile", "PitchKey",
+    # 9-parameter trajectory model coefficients (initial position/velocity/
+    # acceleration) -- present in TrackMan's raw CSV export but previously
+    # never read here, so the dashboard's 3D flight-path feature had no
+    # trajectory data for pitches synced through this pipeline.
+    "x0", "y0", "z0", "vx0", "vy0", "vz0", "ax0", "ay0", "az0"
   )
 }
 
@@ -131,7 +136,16 @@ pitch_data_storage_name_map <- function() {
     PitchGuid = "pitchguid",
     CustomLabel = "customlabel",
     SourceFile = "source_file",
-    PitchKey = "pitch_key"
+    PitchKey = "pitch_key",
+    x0 = "x0",
+    y0 = "y0",
+    z0 = "z0",
+    vx0 = "vx0",
+    vy0 = "vy0",
+    vz0 = "vz0",
+    ax0 = "ax0",
+    ay0 = "ay0",
+    az0 = "az0"
   )
 }
 

@@ -121,3 +121,17 @@ ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS TargetBase text;
 
 ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS Time text;
 ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS customlabel text;
+
+-- 9-parameter trajectory model coefficients (initial position/velocity/
+-- acceleration) from TrackMan's raw CSV export. Previously never captured by
+-- this pipeline, which left the dashboard's 3D flight-path feature with no
+-- trajectory data for pitches synced through pitch_events.
+ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS x0 text;
+ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS y0 text;
+ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS z0 text;
+ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS vx0 text;
+ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS vy0 text;
+ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS vz0 text;
+ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS ax0 text;
+ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS ay0 text;
+ALTER TABLE public.pitch_events ADD COLUMN IF NOT EXISTS az0 text;
