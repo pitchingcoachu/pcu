@@ -144,7 +144,9 @@ school_config <- list(
   "Skaggs, Austin",
   "Hicks, Jackson",
   "O'Brasky, Jack",
-  "Seremak, Finn"
+  "Seremak, Finn",
+  "Twichel, Ryan",
+  "Bates, Tyler"
 ),
   allowed_hitters = c(
     "Stoller, Cody",
