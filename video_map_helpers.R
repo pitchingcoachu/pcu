@@ -305,6 +305,27 @@ video_map_db_get_query <- function(con, sql) {
   )
 }
 
+# DBI::dbExistsTable() doesn't take the `immediate` param used above and can
+# throw the same stale-prepared-statement error under a pooled connection
+# (Neon/PgBouncer) -- retry once like the other video_map_db_* helpers
+# instead of leaving this call unguarded (it previously bubbled all the way
+# up to "Skipping Neon video map sync" and silently dropped that sync).
+video_map_db_exists_table <- function(con, table) {
+  tryCatch(
+    DBI::dbExistsTable(con, table),
+    error = function(e1) {
+      msg <- conditionMessage(e1)
+      recoverable <- grepl(
+        "unnamed prepared statement does not exist|query needs to be bound before fetching|failed to retrieve query result metadata",
+        msg,
+        ignore.case = TRUE
+      )
+      if (!recoverable) stop(e1)
+      DBI::dbExistsTable(con, table)
+    }
+  )
+}
+
 video_map_table_name <- function() {
   explicit <- trimws(Sys.getenv("VIDEO_MAP_DB_TABLE", ""))
   if (nzchar(explicit)) {
@@ -364,7 +385,7 @@ video_map_read_all_neon <- function(play_ids = NULL, school_code = video_map_sch
   if (is.null(con)) return(tibble::tibble())
   on.exit(DBI::dbDisconnect(con), add = TRUE)
   tables <- video_map_table_candidates()
-  existing_tables <- tables[vapply(tables, function(tbl) DBI::dbExistsTable(con, tbl), logical(1))]
+  existing_tables <- tables[vapply(tables, function(tbl) video_map_db_exists_table(con, tbl), logical(1))]
   if (!length(existing_tables)) return(tibble::tibble())
   for (tbl in existing_tables) video_map_ensure_table(con, tbl)
   school_code <- toupper(trimws(as.character(school_code %||% "")))
